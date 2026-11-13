@@ -299,7 +299,7 @@ function createSky() {
     depthWrite: false,
     fog: false,
   }));
-  sunSprite.scale.set(95, 95, 1);
+  sunSprite.scale.set(70, 70, 1);
   sunSprite.renderOrder = -1;
   group.add(sunSprite);
 
@@ -324,7 +324,7 @@ function createSky() {
     v.set(cosA, sinA, 0.33).normalize().multiplyScalar(370);
     sunSprite.position.copy(v);
     sunSprite.material.color.copy(cur.sun);
-    sunSprite.material.opacity = smoothstep(-0.12, 0.05, sinA) * 0.9;
+    sunSprite.material.opacity = smoothstep(-0.12, 0.05, sinA) * 0.30;
     sunSprite.visible = sunSprite.material.opacity > 0.01;
 
     v.set(-cosA, -sinA, -0.2).normalize().multiplyScalar(370);
@@ -935,7 +935,7 @@ function createTown(scene) {
 export function createWorld(scene) {
   scene.background = new THREE.Color(COLORS.skyHorizon);
   // Туман того же цвета, что горизонт. Дальше 130 единиц всё тонет в дымке, краёв моря не видно.
-  scene.fog = new THREE.Fog(COLORS.skyHorizon, 30, 130);
+  scene.fog = new THREE.FogExp2(COLORS.skyHorizon, 0.008);
 
   const sky = createSky();
   scene.add(sky.group);
@@ -1004,6 +1004,8 @@ export function createWorld(scene) {
     sky: sky.group,
     colliders: town.colliders,         // что нельзя проходить насквозь
     surfaceHeight,                     // высота земли с учётом пирса
+    canFish: (x, z) => { const g = groundHeight(x, z); const onPier = Math.abs(x - PIER.x) <= PIER.halfW + 0.7 && z >= PIER.z0 + 0.8 && z <= PIER.z0 + PIER.length; return onPier || (g >= 0.02 && g <= 0.42); },
+    waterHeight: (x, z, t) => waveHeight(x, z, t),
     start: { x: 0, z: 7.2 },           // где появляется героиня
     update: (time) => {
       sea.update(time);

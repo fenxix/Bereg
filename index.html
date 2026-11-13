@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
@@ -6,35 +6,27 @@
   <meta name="theme-color" content="#FFD9B8">
   <title>Тихий Берег</title>
   <link rel="stylesheet" href="style.css">
-
-  <!-- importmap: говорит браузеру, где взять "three" (CDN jsdelivr, версия 0.160.0) -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
-      }
-    }
-  </script>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 </head>
 <body>
-  <!-- Сюда Three.js вставит холст с игрой -->
   <div id="game"></div>
-
-  <!-- Плашка поверх игры -->
-  <div id="hud">
+  <aside id="file-warning" hidden><strong>Запустите игру через локальный сервер</strong><p>Для ES-модулей и Three.js браузеру нужен адрес http://localhost, прямое открытие файла блокирует скрипты.</p><p>Закройте эту вкладку и запустите файл <code>start-game.bat</code> в папке игры.</p></aside>
+  <header id="hud">
     <h1>Тихий Берег</h1>
-    <span id="shells">🐚 0/0</span>
+    <div id="time-card"><span id="time-icon">🌅</span><span><strong id="clock-time">06:00</strong><small id="day-phase">Рассвет</small></span></div><span id="rod-status">🎣 Бамбуковая удочка</span><div class="wallet"><span id="coins">🪙 0</span><span id="pearls">🐚 0</span></div>
+    <button id="bag-toggle" type="button" aria-label="Открыть сумку">🎒 <span id="bag-count">0/12</span></button>
     <span id="fps">FPS: --</span>
-  </div>
-
-  <div id="toast"></div>
-
-  <!-- Подсказка для компьютера -->
-  <p id="hint">WASD или стрелки — идти, Shift — бежать, мышь — камера</p>
-
-  <!-- Джойстик для телефона -->
+  </header>
+  <section id="bag" aria-label="Сумка" hidden>
+    <div class="panel-head"><h2>Сумка</h2><button id="bag-close" type="button" aria-label="Закрыть">×</button></div>
+    <p id="rod-label"></p><div id="inventory-list"></div>
+    <div class="shop"><h3>Сумка и удочки</h3><button id="bag-upgrade" type="button">Расширить сумку (+6)</button><button data-buy-rod="sturdy">Крепкая — 200 🪙</button><button data-buy-rod="gilded">Позолоченная — 1000 🪙 + 3 🐚</button></div>
+  </section>
+  <div id="fishing-status" aria-live="polite" hidden></div><button id="action" type="button" hidden>Взять</button>
+  <div id="toast" role="status"></div>
+  <p id="hint">WASD или стрелки — идти · Shift — бежать · мышь — камера · E — действие</p>
   <div id="joystick"><div id="stick"></div></div>
-
+  <script>if (location.protocol === "file:") document.getElementById("file-warning").hidden = false;</script>
   <script type="module" src="main.js"></script>
 </body>
 </html>

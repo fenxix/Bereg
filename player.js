@@ -17,6 +17,9 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
   let distance = 8;   // расстояние до героини
   let walkPhase = 0;
   let moveBlend = 0;  // плавный переход «стоит» <-> «идёт»
+  const desiredCamera = new THREE.Vector3();
+  const smoothLook = new THREE.Vector3();
+  let cameraReady = false;
   model.rotation.y = Math.PI;
 
   // --- Клавиатура ---
@@ -198,8 +201,20 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
     const cx = pos.x + sinY * cosP * distance;
     const cz = pos.z + cosY * cosP * distance;
     const cy = target.y + Math.sin(pitch) * distance;
-    camera.position.set(cx, Math.max(cy, groundHeight(cx, cz) + 0.6, 0.6), cz);
-    camera.lookAt(target);
+    desiredCamera.set(cx, Math.max(cy, groundHeight(cx, cz) + 0.6, 0.6), cz);
+    // Плавное следование не телепортирует камеру при повороте или движении.
+    if (!cameraReady) {
+      camera.position.copy(desiredCamera);
+      smoothLook.copy(target);
+      cameraReady = true;
+    } else {
+      camera.position.lerp(desiredCamera, 1 - Math.exp(-dt * 5.5));
+      smoothLook.lerp(target, 1 - Math.exp(-dt * 7.5));
+    }
+    const breathing = Math.sin(walkPhase * 0.5) * 0.018 * (1 - moveBlend);
+    smoothLook.y += breathing;
+    camera.lookAt(smoothLook);
+    camera.rotateZ(Math.sin(walkPhase) * 0.004 * moveBlend);
   }
 
   return { update };
