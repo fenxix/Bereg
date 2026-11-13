@@ -100,3 +100,35 @@ body {
   #joystick { display: block; }
   #hint { display: none; }
 }
+
+/* Счётчик ракушек и всплывающая подсказка */
+#shells {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(255, 244, 227, 0.9);
+  transition: transform 0.2s;
+}
+
+#shells.pop { transform: scale(1.25); }
+
+#toast {
+  position: fixed;
+  left: 50%;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  max-width: 90vw;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: #F4A6B8;
+  color: #5B3A2E;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, -12px);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+}
+
+#toast.show { opacity: 1; transform: translate(-50%, 0); }

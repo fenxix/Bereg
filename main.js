@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createWorld } from './world.js';
 import { createHeroine } from './models.js';
 import { createPlayer } from './player.js';
+import { createShells } from './shells.js';
 
 const container = document.getElementById('game');
 const fpsLabel = document.getElementById('fps');
@@ -29,6 +30,14 @@ const player = createPlayer({
   groundHeight: world.surfaceHeight, // земля плюс настил пирса
   colliders: world.colliders,        // дома, деревья, фонари, скамейки, фонтан
   start: world.start,                // место, где появляется героиня
+});
+
+// Ракушки на пляже: собираем, счётчик — в плашке сверху
+const shells = createShells({
+  scene,
+  groundHeight: world.surfaceHeight,
+  hudEl: document.getElementById('shells'),
+  toastEl: document.getElementById('toast'),
 });
 
 function onResize() {
@@ -61,6 +70,7 @@ function loop(now) {
   prevTime = now;
 
   player.update(dt);
+  shells.update(now / 1000, heroine.position);
   world.sky.position.copy(camera.position); // небо всегда вокруг камеры
   world.update(now / 1000);                 // внутри — и волны, и смена времени суток
   renderer.render(scene, camera);
