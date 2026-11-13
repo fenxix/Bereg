@@ -1,6 +1,6 @@
 // main.js — запуск игры: сцена, рендерер, героиня и игровой цикл
 import * as THREE from 'three';
-import { createWorld, groundHeight } from './world.js';
+import { createWorld } from './world.js';
 import { createHeroine } from './models.js';
 import { createPlayer } from './player.js';
 
@@ -18,7 +18,7 @@ container.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
 
-// Мир, героиня и игрок (управление + камера)
+// Мир (с городком), героиня и игрок (управление + камера)
 const world = createWorld(scene);
 const heroine = createHeroine();
 scene.add(heroine);
@@ -26,7 +26,9 @@ const player = createPlayer({
   model: heroine,
   camera,
   domElement: renderer.domElement,
-  groundHeight,
+  groundHeight: world.surfaceHeight, // земля плюс настил пирса
+  colliders: world.colliders,        // дома, деревья, фонари, скамейки, фонтан
+  start: world.start,                // место, где появляется героиня
 });
 
 function onResize() {

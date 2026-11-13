@@ -2,11 +2,16 @@
 import * as THREE from 'three';
 import { animateCharacter } from './models.js';
 
-export function createPlayer({ model, camera, domElement, groundHeight }) {
+// groundHeight здесь — функция высоты поверхности из мира (земля плюс настил пирса).
+// colliders — список препятствий: круги { kind: 'circle', x, z, r }
+// и повёрнутые прямоугольники { kind: 'rect', x, z, hw, hd, rot }.
+export function createPlayer({ model, camera, domElement, groundHeight, colliders = [], start = { x: 0, z: 10 } }) {
   const WALK_SPEED = 3.5;
   const RUN_SPEED = 6;
+  const PLAYER_R = 0.35; // «толщина» героини для столкновений
 
-  const pos = new THREE.Vector3(0, 0, 10); // где стоит героиня
+  const pos = new THREE.Vector3(start.x, 0, start.z); // где стоит героиня
+  pos.y = groundHeight(pos.x, pos.z);
   let yaw = 0;        // камера вокруг героини
   let pitch = 0.4;    // наклон камеры
   let distance = 8;   // расстояние до героини
@@ -78,8 +83,62 @@ export function createPlayer({ model, camera, domElement, groundHeight }) {
     distance = THREE.MathUtils.clamp(distance + e.deltaY * 0.01, 4, 14);
   }, { passive: true });
 
-  // В море не заходим: стоять можно, пока земля не ниже уровня воды
+  // В море не заходим: стоять можно, пока поверхность не ниже уровня воды
   const canStand = (x, z) => groundHeight(x, z) > -0.05;
+
+  // Выталкиваем героиню из домов, деревьев, фонарей, скамеек и фонтана.
+  // Если подошла вплотную — она не застревает, а скользит вдоль препятствия.
+  function resolveCollisions() {
+    for (let pass = 0; pass < 2; pass++) {
+      for (const c of colliders) {
+        if (c.kind === 'circle') {
+          const dx = pos.x - c.x;
+          const dz = pos.z - c.z;
+          const dist = Math.hypot(dx, dz);
+          const min = c.r + PLAYER_R;
+          if (dist < min) {
+            if (dist > 0.0001) {
+              pos.x = c.x + (dx / dist) * min;
+              pos.z = c.z + (dz / dist) * min;
+            } else {
+              pos.x = c.x + min;
+            }
+          }
+        } else {
+          // Прямоугольник повёрнут: переводим точку в его собственные координаты
+          const cos = Math.cos(c.rot);
+          const sin = Math.sin(c.rot);
+          const dx = pos.x - c.x;
+          const dz = pos.z - c.z;
+          const lx = dx * cos - dz * sin;
+          const lz = dx * sin + dz * cos;
+          const nx = Math.max(-c.hw, Math.min(c.hw, lx)); // ближайшая точка прямоугольника
+          const nz = Math.max(-c.hd, Math.min(c.hd, lz));
+          const ox = lx - nx;
+          const oz = lz - nz;
+          const dist = Math.hypot(ox, oz);
+          if (dist >= PLAYER_R) continue;
+
+          let pushX = 0;
+          let pushZ = 0;
+          if (dist > 0.0001) {
+            const k = (PLAYER_R - dist) / dist;
+            pushX = ox * k;
+            pushZ = oz * k;
+          } else {
+            // Центр героини оказался внутри — выталкиваем через ближайшую сторону
+            const px = c.hw - Math.abs(lx);
+            const pz = c.hd - Math.abs(lz);
+            if (px < pz) pushX = (lx >= 0 ? 1 : -1) * (px + PLAYER_R);
+            else pushZ = (lz >= 0 ? 1 : -1) * (pz + PLAYER_R);
+          }
+          // Переводим выталкивание обратно в мировые координаты
+          pos.x += pushX * cos + pushZ * sin;
+          pos.z += -pushX * sin + pushZ * cos;
+        }
+      }
+    }
+  }
 
   function update(dt) {
     dt = Math.min(dt, 0.05);
@@ -101,8 +160,10 @@ export function createPlayer({ model, camera, domElement, groundHeight }) {
     const dx = -sinY * iy + cosY * ix;
     const dz = -cosY * iy - sinY * ix;
 
-    // 3. Шаг (если упёрлись в воду — скользим вдоль берега)
+    // 3. Шаг (если упёрлись в воду — скользим вдоль берега, а в дома и деревья — упираемся)
     if (amount > 0) {
+      const oldX = pos.x;
+      const oldZ = pos.z;
       const running = keys.has('ShiftLeft') || keys.has('ShiftRight');
       const step = (running ? RUN_SPEED : WALK_SPEED) * dt;
       const nx = pos.x + dx * step;
@@ -111,12 +172,19 @@ export function createPlayer({ model, camera, domElement, groundHeight }) {
       else if (canStand(nx, pos.z)) pos.x = nx;
       else if (canStand(pos.x, nz)) pos.z = nz;
 
+      resolveCollisions();
+      // Если выталкивание привело в воду — возвращаемся на прошлое место
+      if (!canStand(pos.x, pos.z)) { pos.x = oldX; pos.z = oldZ; }
+
       // Поворачиваем героиню лицом по ходу движения (по кратчайшему пути)
       let diff = Math.atan2(dx, dz) - model.rotation.y;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       model.rotation.y += diff * Math.min(1, dt * 12);
     }
-    pos.y = groundHeight(pos.x, pos.z);
+
+    // Высота плавно меняется: при выходе на пирс и на крыльцо нет «рывка»
+    const targetY = groundHeight(pos.x, pos.z);
+    pos.y += (targetY - pos.y) * Math.min(1, dt * 14);
     model.position.copy(pos);
 
     // 4. Анимация ходьбы
