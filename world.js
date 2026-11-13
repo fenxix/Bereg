@@ -216,8 +216,8 @@ function createLights(scene) {
 // ===== Собираем весь мир =====
 export function createWorld(scene) {
   scene.background = new THREE.Color(COLORS.skyHorizon);
-  // Туман того же цвета, что горизонт. Дальность подстраивает main.js под камеру.
-  scene.fog = new THREE.Fog(COLORS.skyHorizon, 60, 220);
+  // Туман того же цвета, что горизонт. Дальше 130 единиц всё тонет в дымке, краёв моря не видно.
+  scene.fog = new THREE.Fog(COLORS.skyHorizon, 30, 130);
 
   const sky = createSky();
   scene.add(sky);

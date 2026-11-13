@@ -1,6 +1,8 @@
-// main.js — запуск игры: сцена, рендерер, камера и игровой цикл
+// main.js — запуск игры: сцена, рендерер, героиня и игровой цикл
 import * as THREE from 'three';
-import { createWorld } from './world.js';
+import { createWorld, groundHeight } from './world.js';
+import { createHeroine } from './models.js';
+import { createPlayer } from './player.js';
 
 const container = document.getElementById('game');
 const fpsLabel = document.getElementById('fps');
@@ -14,29 +16,18 @@ container.appendChild(renderer.domElement);
 
 // Сцена и камера
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 900);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
 
-// Мир: небо, остров, море, свет, туман (всё в world.js)
+// Мир, героиня и игрок (управление + камера)
 const world = createWorld(scene);
-
-// Камера пока статичная: смотрит на остров сверху сбоку.
-const CAMERA_TILT = THREE.MathUtils.degToRad(25); // угол подъёма камеры
-const ISLAND_HALF_WIDTH = 34; // остров с запасом должен влезать по ширине
-
-function fitCamera() {
-  // На узком телефонном экране камера отъезжает дальше, чтобы остров влез
-  const tanHalfV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const tanHalfH = tanHalfV * camera.aspect;
-  const distance = Math.max(68, ISLAND_HALF_WIDTH / tanHalfH);
-
-  camera.position.set(0, distance * Math.sin(CAMERA_TILT), distance * Math.cos(CAMERA_TILT));
-  // Смотрим чуть дальше острова — так вверху экрана виден горизонт и небо
-  camera.lookAt(0, 0, -distance * 0.6);
-
-  world.sky.position.copy(camera.position);
-  scene.fog.near = distance * 0.9;
-  scene.fog.far = distance + 150;
-}
+const heroine = createHeroine();
+scene.add(heroine);
+const player = createPlayer({
+  model: heroine,
+  camera,
+  domElement: renderer.domElement,
+  groundHeight,
+});
 
 function onResize() {
   const w = window.innerWidth;
@@ -44,18 +35,23 @@ function onResize() {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  fitCamera();
 }
 window.addEventListener('resize', onResize);
 onResize();
 
-// Игровой цикл: каждый кадр обновляем мир и рисуем сцену
+// Игровой цикл: каждый кадр обновляем игрока и мир, потом рисуем сцену
 let frames = 0;
 let lastFpsTime = performance.now();
+let prevTime = performance.now();
 
 function loop(now) {
   requestAnimationFrame(loop);
 
+  const dt = (now - prevTime) / 1000;
+  prevTime = now;
+
+  player.update(dt);
+  world.sky.position.copy(camera.position); // небо всегда вокруг камеры
   world.update(now / 1000);
   renderer.render(scene, camera);
 

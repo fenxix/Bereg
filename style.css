@@ -53,3 +53,50 @@ body {
   border-radius: 999px;
   background: rgba(255, 244, 227, 0.8);
 }
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  font-size: 13px;
+  color: #5B3A2E;
+  pointer-events: none;
+}
+
+#joystick {
+  display: none;
+  position: fixed;
+  left: calc(24px + env(safe-area-inset-left, 0px));
+  bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: rgba(255, 244, 227, 0.35);
+  border: 2px solid rgba(255, 244, 227, 0.75);
+  touch-action: none;
+}
+
+#stick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #F4A6B8;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* На телефоне показываем джойстик и прячем подсказку про клавиатуру */
+@media (pointer: coarse) {
+  #joystick { display: block; }
+  #hint { display: none; }
+}
