@@ -41,6 +41,14 @@ function onResize() {
 window.addEventListener('resize', onResize);
 onResize();
 
+// Для проверки времени суток: клавиша T перематывает время вперёд на 1/8 суток.
+// (Потом можно удалить эти строки. Ещё можно открыть игру с адресом ?time=0.9 — тогда время стоит на месте.)
+window.addEventListener('keydown', (event) => {
+  const tag = event.target && event.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (event.code === 'KeyT') world.skipTime(0.125);
+});
+
 // Игровой цикл: каждый кадр обновляем игрока и мир, потом рисуем сцену
 let frames = 0;
 let lastFpsTime = performance.now();
@@ -54,7 +62,7 @@ function loop(now) {
 
   player.update(dt);
   world.sky.position.copy(camera.position); // небо всегда вокруг камеры
-  world.update(now / 1000);
+  world.update(now / 1000);                 // внутри — и волны, и смена времени суток
   renderer.render(scene, camera);
 
   frames++;
