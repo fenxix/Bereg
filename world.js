@@ -3,7 +3,11 @@ import * as THREE from 'three';
 import {
   createHouse, createTree, createLamp, createBoat, createDock,
   createBench, createFlowers, createFountain, instanceModel,
+  createCrate, createBarrel, createStall, createNetRack, createFisherHut, createLighthouse,
+  createFence, createMailbox, createMushrooms, createRock, createStep,
+  createLounger, createUmbrella, createSwingTree,
 } from './models.js';
+import { ZONES, PATHS, zoneById, distToPaths, layoutZones } from './zones.js';
 
 // ===== Настройки (удобно менять здесь) =====
 const COLORS = {
@@ -18,6 +22,7 @@ const COLORS = {
   plazaMiddle: 0xD9C8A8,
   tileA: 0xE6D8BF,
   tileB: 0xDACBAE,
+  rock: 0xC9BBA8,
 };
 
 const SEA_LEVEL = 0;     // высота воды
@@ -29,13 +34,13 @@ const TOWN_FLAT_R = 13;   // до этого расстояния земля и�
 const TOWN_BLEND_R = 18;  // дальше она плавно возвращается к холмам
 const PLAZA_R = 4.4;      // радиус площади с фонтаном
 
-// Холмы: центр (x, z), ширина r, высота h. Они на краю острова, вокруг городка.
-const HILLS = [
-  { x: -11, z: -9, r: 5, h: 2.6 },
-  { x: 13, z: -9, r: 4.5, h: 2.0 },
-  { x: -15, z: 5, r: 4, h: 1.5 },
-  { x: 5, z: -17, r: 4.5, h: 1.8 },
-];
+// Дальние зоны не рисуем: считаем расстояние от героини до края зоны.
+// 45 — это уже в тумане, поэтому появление зоны почти не заметно
+const CULL_DISTANCE = 45;
+// Туман: над островом обычный, а за его пределами чуть гуще, чтобы край карты не выглядел обрезанным
+const FOG_BASE = 0.008;
+const FOG_SEA = 0.0105;
+const SHADOW_R = 40;       // сколько единиц вокруг героини покрывают тени
 
 // Дома: угол (в градусах, 0 — на восток, 90 — на юг), расстояние от центра, вариант дома.
 // Южное направление (90) свободно: там дорога к пирсу.
@@ -53,6 +58,7 @@ const DAY_LENGTH = 12 * 60;      // полный круг суток: 12 реа�
 const LAMP_GLOW_DROP = 0.25;     // насколько ниже верхушки фонаря сидит его свечение
 const WINDOW_GLOW = 0xFFB45E;    // тёплый свет окон
 const LAMP_GLOW = 0xFFD08A;      // тёплый свет фонарей
+const GLASS_COLOR = 0xBFD9F2;    // цвет стекла в моделях: по нему находим окна у «запечённых» домов
 
 // Время суток: 0 — полночь, 0.25 — рассвет, 0.5 — полдень, 0.75 — закат.
 // Между «ключевыми точками» все цвета и числа плавно перетекают друг в друга.
@@ -168,28 +174,125 @@ function makeGlowTexture(kind) {
   return texture;
 }
 
+// ===== Рельеф =====
+// Вся высота земли считается формулой, случайных чисел здесь нет.
+// Поэтому у всех игроков остров одинаковый.
+
+// Радиус острова был 26, теперь 48 (в 1,85 раза): площадь выросла примерно в 3,4 раза.
+const ISLAND_R = 48;
+const SHORE_FROM = -4;   // профиль берега: на этом расстоянии от кромки острова земля на дне...
+const SHORE_TO = 9;      // ...а здесь уже выходит на ровную землю
+const WALK_MIN = -0.1;   // глубже этого героиню в воду не пускаем
+
+// Обратная функция к smoothstep: по высоте находит расстояние. Нужна, чтобы узнать, где кромка воды.
+function invSmoothstep(y) {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (mid * mid * (3 - 2 * mid) < y) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+// Расстояние от кромки острова, на котором земля ровно на уровне моря
+const D_WATER = SHORE_FROM + (SHORE_TO - SHORE_FROM) * invSmoothstep((SEA_LEVEL - SEABED) / (PLATEAU - SEABED));
+
+// Зоны, которым нужен свой рельеф
+const Z_LIGHTHOUSE = zoneById('lighthouse');
+const Z_MEADOW = zoneById('meadow');
+const Z_MARKET = zoneById('market');
+const Z_QUARTER = zoneById('quarter');
+const Z_HARBOR = zoneById('harbor');
+const Z_COVE = zoneById('cove');
+
+// Водоёмы, вырезанные в острове. Это отрезок (a — b), r — расстояние от оси до кромки воды.
+const HARBOR_BAY_Z = 30.6; // подобрано так, чтобы пирс начинался там же, где раньше (z ≈ 17,85)
+const COVE_CENTER = { x: 36, z: 27.5 };
+const WATER_BODIES = [
+  // бухта гавани у пирса и канал, который уходит на юг к открытому морю
+  { ax: 0, az: HARBOR_BAY_Z, bx: 0, bz: 90, r: 11 },
+  // Тихая бухта: круглая выемка в юго-восточном берегу
+  { ax: COVE_CENTER.x, az: COVE_CENTER.z, bx: COVE_CENTER.x, bz: COVE_CENTER.z, r: 9 },
+];
+
 // Радиус берега в зависимости от угла: делает остров неровным, не круглым
 function shoreRadius(angle) {
-  return 26 + 2.5 * Math.sin(3 * angle + 1) + 1.5 * Math.sin(5 * angle + 2);
+  return ISLAND_R + 4.6 * Math.sin(3 * angle + 1) + 2.8 * Math.sin(5 * angle + 2);
 }
 
-// Высота земли в точке (x, z)
-export function groundHeight(x, z) {
-  const d = shoreRadius(Math.atan2(z, x)) - Math.hypot(x, z); // >0 — внутри острова
-  const s = smoothstep(-4, 9, d);
-  const base = SEABED + s * (PLATEAU - SEABED); // плавный пологий берег
+function distToSegment(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const len2 = dx * dx + dz * dz || 1;
+  const t = Math.min(1, Math.max(0, ((px - ax) * dx + (pz - az) * dz) / len2));
+  return Math.hypot(px - (ax + dx * t), pz - (az + dz * t));
+}
 
-  let hills = 0;
-  for (const hill of HILLS) {
-    const dx = x - hill.x;
-    const dz = z - hill.z;
-    hills += hill.h * Math.exp(-(dx * dx + dz * dz) / (hill.r * hill.r));
+// Мягкий минимум: в местах, где бухта встречается с берегом, углы получаются скруглёнными
+function smoothMin(a, b, k) {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - h * h * k * 0.25;
+}
+
+// Насколько точка «в глубине суши»: больше 0 — внутри острова, меньше 0 — в море
+function landDistance(x, z) {
+  let d = shoreRadius(Math.atan2(z, x)) - Math.hypot(x, z);
+  for (const w of WATER_BODIES) {
+    d = smoothMin(d, distToSegment(x, z, w.ax, w.az, w.bx, w.bz) - (w.r - D_WATER), 3);
   }
-  const natural = base + hills * smoothstep(8, 16, d); // холмы только вдали от берега
+  return d;
+}
 
-  // В центре земля ровная, там стоит городок
-  const flat = 1 - smoothstep(TOWN_FLAT_R, TOWN_BLEND_R, Math.hypot(x, z));
-  return natural + (PLATEAU - natural) * flat;
+// Вокруг Тихой бухты берег пологий, поэтому песчаная полоса получается широкой
+function beachMask(x, z) {
+  return 1 - smoothstep(11, 24, Math.hypot(x - COVE_CENTER.x, z - COVE_CENTER.z));
+}
+
+// Холмы: центр, высота h, ровная вершина (top), где холм кончается (out).
+// edgeFrom..edgeTo — на каком расстоянии от берега холм набирает полную высоту.
+const HILLS = [
+  { x: Z_LIGHTHOUSE.x, z: Z_LIGHTHOUSE.z, h: 5, top: 4, out: 16.5, edgeFrom: 0, edgeTo: 16 }, // скала с маяком
+  { x: Z_MEADOW.x, z: Z_MEADOW.z, h: 1.7, top: 3, out: 11, edgeFrom: 8, edgeTo: 16 },               // холм цветочного луга
+  { x: 44, z: -10, h: 1.5, top: 0, out: 10, edgeFrom: 8, edgeTo: 16 },                         // мягкие холмы для красоты
+  { x: -40, z: 26, h: 1.6, top: 0, out: 11, edgeFrom: 8, edgeTo: 16 },
+  { x: 12, z: -43, h: 1.4, top: 0, out: 10, edgeFrom: 8, edgeTo: 16 },
+];
+
+// Места, где земля остаётся ровной (там стоят дома, лавки, лодки). Работает на холмы и неровности.
+const FLAT_AREAS = [
+  { x: 0, z: 0, from: TOWN_FLAT_R, to: TOWN_BLEND_R },                        // городок
+  { x: Z_MARKET.x, z: Z_MARKET.z, from: 8, to: 13 },                          // торговая улица
+  { x: Z_QUARTER.x, z: Z_QUARTER.z, from: 10, to: 16 },                       // жилой квартал
+  { x: Z_HARBOR.x, z: Z_HARBOR.z, from: 14, to: 22 },                         // гавань
+  { x: Z_COVE.x, z: Z_COVE.z, from: 8, to: 14 },                              // пляж
+];
+
+function flatness(x, z) {
+  let f = 0;
+  for (const a of FLAT_AREAS) {
+    f = Math.max(f, 1 - smoothstep(a.from, a.to, Math.hypot(x - a.x, z - a.z)));
+  }
+  return f;
+}
+
+// Холмы и мягкие неровности сверху на базовой земле
+function extraHeight(x, z, d) {
+  let h = 0;
+  for (const hill of HILLS) {
+    const dist = Math.hypot(x - hill.x, z - hill.z);
+    h += hill.h * (1 - smoothstep(hill.top, hill.out, dist)) * smoothstep(hill.edgeFrom, hill.edgeTo, d);
+  }
+  const wave = 0.22 * Math.sin(x * 0.13 + 0.7) * Math.sin(z * 0.11 + 2.1);
+  return h + wave * smoothstep(15, 24, Math.hypot(x, z)) * smoothstep(6, 12, d);
+}
+
+// Высота земли в точке (x, z). Единый источник правды: по ней ходит героиня и на ней стоят все модели.
+export function groundHeight(x, z) {
+  const d = landDistance(x, z);
+  const k = 1 - 0.6 * beachMask(x, z);
+  const s = smoothstep(SHORE_FROM, SHORE_TO, D_WATER + (d - D_WATER) * k); // плавный пологий берег
+  const base = SEABED + s * (PLATEAU - SEABED);
+  return base + extraHeight(x, z, d) * (1 - flatness(x, z));
 }
 
 // ===== Пирс: где начинается и куда идёт =====
@@ -341,9 +444,11 @@ function createSky() {
   return { group, update };
 }
 
-// ===== Остров: земля с холмами и песчаным берегом =====
+// ===== Остров: земля с холмами, песчаным берегом и каменистыми склонами =====
 function createIsland() {
-  const geo = new THREE.PlaneGeometry(100, 100, 64, 64);
+  const SIZE = 120;      // сторона квадрата земли (раньше было 100, остров стал больше)
+  const SEGMENTS = 80;   // сетка: одна клетка около 1,5 единицы
+  const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEGMENTS, SEGMENTS);
   geo.rotateX(-Math.PI / 2);
 
   const pos = geo.attributes.position;
@@ -351,9 +456,11 @@ function createIsland() {
   const sand = new THREE.Color(COLORS.sand);
   const grass = new THREE.Color(COLORS.grass);
   const darkGrass = new THREE.Color(COLORS.darkGrass);
+  const rock = new THREE.Color(COLORS.rock);
   const sea = new THREE.Color(COLORS.sea);
   const foam = new THREE.Color(COLORS.foam);
   const c = new THREE.Color();
+  const e = 0.6; // шаг, которым меряем крутизну склона
 
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -369,6 +476,13 @@ function createIsland() {
       c.copy(sand)
         .lerp(grass, smoothstep(0.3, 0.55, h))
         .lerp(darkGrass, smoothstep(1.0, 2.6, h));
+
+      // крутые склоны (скала маяка) становятся каменистыми
+      const slope = Math.hypot(
+        groundHeight(x + e, z) - groundHeight(x - e, z),
+        groundHeight(x, z + e) - groundHeight(x, z - e)
+      ) / (2 * e);
+      c.lerp(rock, smoothstep(0.4, 0.75, slope) * smoothstep(0.8, 1.6, h) * 0.85);
     }
 
     // полоска пены у кромки воды
@@ -455,15 +569,16 @@ function createLights(scene) {
   sun.shadow.mapSize.set(mapSize, mapSize);
 
   const cam = sun.shadow.camera;
-  cam.left = -45;
-  cam.right = 45;
-  cam.top = 45;
-  cam.bottom = -45;
+  cam.left = -SHADOW_R;
+  cam.right = SHADOW_R;
+  cam.top = SHADOW_R;
+  cam.bottom = -SHADOW_R;
   cam.near = 1;
   cam.far = 150;
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.05;
   scene.add(sun);
+  scene.add(sun.target); // цель света двигается вслед за героиней
 
   // Луна: синеватый свет без теней (так дешевле для телефона)
   const moon = new THREE.DirectionalLight(0xA9BBFF, 0);
@@ -490,6 +605,12 @@ function findWindowMeshes(house) {
     if (!o.isMesh) return;
     const name = `${o.name || ''} ${o.material && o.material.name ? o.material.name : ''}`.toLowerCase();
     if (/window|окн|glass|стекл/.test(name)) found.push(o);
+  });
+  if (found.length > 0) return found;
+
+  // Дом «запечён» (bakeStatic): имён уже нет, но все стёкла склеены в одну деталь одного цвета
+  house.traverse((o) => {
+    if (o.isMesh && o.material && o.material.color && o.material.color.getHex() === GLASS_COLOR) found.push(o);
   });
   if (found.length > 0) return found;
 
@@ -599,9 +720,9 @@ function createLampGlow(placements, lampTop) {
 function createFireflies(rand) {
   const spots = [
     // центр x, центр z, радиус, сколько штук, минимальный радиус от центра
-    { x: -6, z: -17.5, r: 6, count: 22, minR: 0 },
-    { x: 18, z: 3, r: 6, count: 16, minR: 0 },
-    { x: 0, z: 0, r: 21, count: 22, minR: 7 },
+    { x: zoneById('pines').x, z: zoneById('pines').z, r: 9, count: 22, minR: 0 },
+    { x: zoneById('meadow').x, z: zoneById('meadow').z, r: 8, count: 16, minR: 0 },
+    { x: 0, z: 0, r: 34, count: 30, minR: 7 },
   ];
 
   const base = [];
@@ -685,6 +806,49 @@ function addPath(tiles, ax, az, bx, bz, columns) {
   }
 }
 
+// ===== Помощники для городка =====
+
+// Попала ли точка (x, z) внутрь препятствия. pad — запас вокруг него.
+function insideCollider(c, x, z, pad) {
+  if (c.kind === 'circle') return Math.hypot(x - c.x, z - c.z) < c.r + pad;
+  const dx = x - c.x;
+  const dz = z - c.z;
+  const cos = Math.cos(c.rot);
+  const sin = Math.sin(c.rot);
+  const lx = dx * cos - dz * sin;
+  const lz = dx * sin + dz * cos;
+  return Math.abs(lx) < c.hw + pad && Math.abs(lz) < c.hd + pad;
+}
+
+// Невидимая граница: маленькие круги по воде вдоль всего берега (бухту и канал гавани тоже).
+// Героиня упирается в них, как в стену, и скользит вдоль берега. Место, где начинается пирс, оставляем свободным.
+function addWaterWall(colliders) {
+  const STEP = 1;
+  const LIMIT = 62;
+  const WALL_R = 0.9;
+  const isLand = (x, z) => groundHeight(x, z) >= WALK_MIN;
+  const onPierGap = (x, z) =>
+    Math.abs(x - PIER.x) <= PIER.halfW + 0.05 && z >= PIER.z0 - 1.5 && z <= PIER.z0 + PIER.length + 1;
+
+  let count = 0;
+  for (let x = -LIMIT; x <= LIMIT; x += STEP) {
+    for (let z = -LIMIT; z <= LIMIT; z += STEP) {
+      if (isLand(x, z) || onPierGap(x, z)) continue;
+      let touchesLand = false;
+      for (let dx = -1; dx <= 1 && !touchesLand; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if ((dx || dz) && isLand(x + dx * STEP, z + dz * STEP)) { touchesLand = true; break; }
+        }
+      }
+      if (touchesLand) {
+        colliders.push({ kind: 'circle', x, z, r: WALL_R });
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
 // ===== Городок: площадь, дома, дорожки, пирс, роща и цветочный луг =====
 function createTown(scene) {
   const town = new THREE.Group();
@@ -695,6 +859,15 @@ function createTown(scene) {
   const flowerSpots = [];        // места цветочных кустов
   const windowMeshes = [];       // окна домов (светятся ночью)
   const rand = makeRandom(20260);
+
+  // У каждой зоны своя группа. Так далёкую зону можно целиком выключить, пока героиня к ней не подошла.
+  const zoneGroups = new Map();
+  for (const zone of ZONES) {
+    const group = new THREE.Group();
+    group.name = 'зона-' + zone.id;
+    town.add(group);
+    zoneGroups.set(zone.id, group);
+  }
 
   // --- Площадь: три круглых плиты друг на друге ---
   const discs = [
@@ -718,7 +891,48 @@ function createTown(scene) {
   town.add(fountain);
   colliders.push({ kind: 'circle', x: 0, z: 0, r: 1.95 });
 
+  // --- Помощники: ближайшая зона и расстановка копий по зонам ---
+  const zoneFor = (x, z) => {
+    let best = zoneGroups.get('plaza');
+    let bestD = Infinity;
+    for (const zone of ZONES) {
+      const d = Math.hypot(x - zone.x, z - zone.z) - zone.r;
+      if (d < bestD) { bestD = d; best = zoneGroups.get(zone.id); }
+    }
+    return best;
+  };
+  // Ставит модель копиями (InstancedMesh). Копии делятся по зонам, чтобы дальнюю зону можно было выключить целиком.
+  // lift — на сколько опустить модель в землю (отрицательное число = утопить), shadow: false — без тени (для мелочи)
+  const addInstances = (model, list, { lift = -0.02, shadow = true } = {}) => {
+    if (!list.length) return;
+    const byGroup = new Map();
+    for (const item of list) {
+      const group = zoneFor(item.x, item.z);
+      if (!byGroup.has(group)) byGroup.set(group, []);
+      byGroup.get(group).push({
+        x: item.x, y: groundHeight(item.x, item.z) + lift + (item.lift || 0), z: item.z,
+        rotY: item.rotY, scale: item.scale, scaleY: item.scaleY,
+      });
+    }
+    for (const [group, placements] of byGroup) {
+      const inst = instanceModel(model, placements);
+      if (!shadow) inst.traverse((o) => { o.castShadow = false; });
+      group.add(inst);
+    }
+  };
+
   // --- Дома по кругу, двери смотрят на площадь ---
+  // Каждый вариант дома собираем один раз, а потом ставим копиями: так на телефоне в разы меньше вызовов отрисовки
+  const houseModels = [];
+  const housePlacements = [[], [], []];
+  const houseModel = (variant) => {
+    const v = ((variant % 3) + 3) % 3;
+    if (!houseModels[v]) {
+      houseModels[v] = createHouse(v);
+      windowMeshes.push(...findWindowMeshes(houseModels[v])); // пока дом не повёрнут
+    }
+    return houseModels[v];
+  };
   for (const h of HOUSES) {
     const a = THREE.MathUtils.degToRad(h.angle);
     const ux = Math.cos(a);
@@ -727,11 +941,8 @@ function createTown(scene) {
     const hz = uz * h.radius;
     const rot = Math.atan2(-ux, -uz); // повернуть дверью к центру
 
-    const house = createHouse(h.variant);
-    windowMeshes.push(...findWindowMeshes(house)); // пока дом не повёрнут
-    house.position.set(hx, groundHeight(hx, hz) - 0.05, hz);
-    house.rotation.y = rot;
-    town.add(house);
+    const house = houseModel(h.variant);
+    housePlacements[h.variant % 3].push({ x: hx, y: groundHeight(hx, hz) - 0.05, z: hz, rotY: rot });
 
     const { w, d } = house.userData.footprint;
     colliders.push({ kind: 'rect', x: hx, z: hz, hw: w / 2 + 0.05, hd: d / 2 + 0.05, rot });
@@ -753,44 +964,54 @@ function createTown(scene) {
     }
   }
 
-  // Окна готовы: делаем им «светящийся» материал
+  // --- Расстановка по зонам: числа считает zones.js (layoutZones), здесь только ставим модели ---
+  const layout = layoutZones({
+    groundHeight,
+    rand,
+    pier: PIER,
+    // сюда ничего не ставим: площадь и дорога к пирсу
+    blocked: (x, z) => Math.hypot(x, z) < PLAZA_R + 1.9 || (Math.abs(x) < 3 && z > 3 && z < PIER.z0 + 12),
+    reserved: HOUSES.map((h) => {
+      const a = THREE.MathUtils.degToRad(h.angle);
+      return { x: Math.cos(a) * h.radius, z: Math.sin(a) * h.radius, r: 3.6 };
+    }),
+  });
+  colliders.push(...layout.colliders);
+
+  // Дома жилого квартала: те же три модели
+  for (const h of layout.houses) {
+    houseModel(h.variant);
+    housePlacements[h.variant % 3].push({ x: h.x, y: groundHeight(h.x, h.z) - 0.05, z: h.z, rotY: h.rotY });
+  }
+
+  // Домик рыбака и маяк: по одному, у них тоже есть окна
+  const hut = layout.hut ? createFisherHut() : null;
+  if (hut) windowMeshes.push(...findWindowMeshes(hut));
+  const lighthouse = createLighthouse();
+  windowMeshes.push(...findWindowMeshes(lighthouse));
+
+  // Окна готовы: делаем им «светящийся» материал. Это нужно сделать ДО того, как дома встанут копиями.
   const windowGlow = makeWindowGlow(windowMeshes);
   if (windowGlow.count > 0) {
     console.log(`[Тихий Берег] окон найдено: ${windowGlow.count} (они будут светиться ночью)`);
   } else {
     console.warn('[Тихий Берег] окна в домах не найдены — ночью они не засветятся. Пришли models.js, подгоню.');
   }
+  houseModels.forEach((model, v) => {
+    if (model && housePlacements[v].length) town.add(instanceModel(model, housePlacements[v]));
+  });
+
+  if (hut) {
+    hut.position.set(layout.hut.x, groundHeight(layout.hut.x, layout.hut.z) - 0.02, layout.hut.z);
+    hut.rotation.y = layout.hut.rotY;
+    zoneGroups.get('harbor').add(hut);
+  }
+  lighthouse.position.set(layout.lighthouse.x, groundHeight(layout.lighthouse.x, layout.lighthouse.z) - 0.1, layout.lighthouse.z);
+  lighthouse.rotation.y = layout.lighthouse.rotY;
+  zoneGroups.get('lighthouse').add(lighthouse);
 
   // --- Дорога от площади к пирсу ---
   addPath(tiles, 0, PLAZA_R + 0.1, 0, PIER.z0 - 0.2, 3);
-
-  // --- Плитки одним InstancedMesh ---
-  const validTiles = tiles.filter((t) => Math.hypot(t.x, t.z) > PLAZA_R - 0.2 && groundHeight(t.x, t.z) > 0.3);
-  const tileMesh = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(0.8, 0.04, 0.8),
-    new THREE.MeshStandardMaterial({ color: 0xFFFFFF, flatShading: true, roughness: 1 }),
-    validTiles.length
-  );
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const e = new THREE.Euler();
-  const p = new THREE.Vector3();
-  const one = new THREE.Vector3(1, 1, 1);
-  const colorA = new THREE.Color(COLORS.tileA);
-  const colorB = new THREE.Color(COLORS.tileB);
-  validTiles.forEach((t, i) => {
-    e.set(0, t.rot, 0);
-    q.setFromEuler(e);
-    p.set(t.x, groundHeight(t.x, t.z) + 0.02, t.z);
-    m.compose(p, q, one);
-    tileMesh.setMatrixAt(i, m);
-    tileMesh.setColorAt(i, t.shade ? colorA : colorB);
-  });
-  tileMesh.instanceMatrix.needsUpdate = true;
-  if (tileMesh.instanceColor) tileMesh.instanceColor.needsUpdate = true;
-  tileMesh.receiveShadow = true;
-  tileMesh.frustumCulled = false;
-  town.add(tileMesh);
 
   // --- Скамейки и фонари (по одной модели, много мест) ---
   const toCenter = (angleDeg) => {
@@ -825,6 +1046,7 @@ function createTown(scene) {
   }
   addLamp(-1.9, 10.5);
   addLamp(1.9, 15.5);
+  for (const l of layout.lamps) addLamp(l.x, l.z);   // фонари на торговой улице и в квартале
   town.add(instanceModel(createLamp(), lampPlacements));
 
   // Свечение фонарей: высоту фонаря узнаём по размеру его модели
@@ -837,74 +1059,148 @@ function createTown(scene) {
   dock.position.set(PIER.x, PIER.deckTop - dock.userData.deckTop, PIER.z0);
   town.add(dock);
 
-  const boat = createBoat();
-  boat.position.set(PIER.x - 2.7, 0, PIER.z0 + 6.5);
-  boat.rotation.y = 0.07;
-  town.add(boat);
-
-  // --- Деревья: роща на севере и несколько деревьев по краям городка ---
-  const treeLists = { round: [], pine: [], blossom: [] };
-  const treeSpots = [];
-  const tryTree = (x, z, type) => {
-    if (groundHeight(x, z) < 0.5) return false;
-    for (const t of treeSpots) {
-      if (Math.hypot(t.x - x, t.z - z) < 2.3) return false;
-    }
-    const scale = 0.85 + rand() * 0.5;
-    treeSpots.push({ x, z });
-    treeLists[type].push({
-      x, y: groundHeight(x, z) - 0.05, z,
-      rotY: rand() * Math.PI * 2,
-      scale,
-      scaleY: scale * (0.9 + rand() * 0.3),
-    });
-    colliders.push({ kind: 'circle', x, z, r: 0.4 * scale });
-    return true;
+  // Лодки: одна у пирса и три у берега бухты (копии одной модели). Качаются на волнах в update().
+  const boatModel = createBoat();
+  const boats = [];
+  const addBoat = (x, z, rotY, group, model) => {
+    model.position.set(x, 0, z);
+    model.rotation.y = rotY;
+    group.add(model);
+    boats.push(model);
   };
+  addBoat(PIER.x - 2.7, PIER.z0 + 6.5, 0.07, town, boatModel);
+  for (const b of layout.boats) addBoat(b.x, b.z, b.rotY, zoneGroups.get('harbor'), boatModel.clone());
 
-  // Роща: север острова
-  let placed = 0;
-  for (let i = 0; i < 700 && placed < 26; i++) {
-    const ang = rand() * Math.PI * 2;
-    const rad = Math.sqrt(rand()) * 6.5;
-    const roll = rand();
-    const type = roll < 0.5 ? 'round' : roll < 0.85 ? 'pine' : 'blossom';
-    if (tryTree(-6 + Math.cos(ang) * rad, -17.5 + Math.sin(ang) * rad, type)) placed++;
+  // Невидимые перила: с пирса нельзя шагнуть в воду ни вбок, ни с конца
+  const railX = PIER.halfW + 0.2;
+  const railMid = PIER.z0 + PIER.length / 2;
+  for (const side of [-1, 1]) {
+    colliders.push({ kind: 'rect', x: PIER.x + side * railX, z: railMid, hw: 0.2, hd: PIER.length / 2 + 0.2, rot: 0 });
+  }
+  colliders.push({ kind: 'rect', x: PIER.x, z: PIER.z0 + PIER.length + 0.25, hw: PIER.halfW + 0.4, hd: 0.25, rot: 0 });
+
+  // --- Деревья: каждый тип одной моделью-копиями, по зонам ---
+  for (const type of ['pine', 'round', 'blossom']) {
+    addInstances(createTree({ type }), layout.trees.filter((t) => t.type === type), { lift: -0.05 });
   }
 
-  // Отдельные деревья вокруг городка (не на дороге к пирсу и не на цветочном лугу)
-  placed = 0;
-  for (let i = 0; i < 500 && placed < 12; i++) {
-    const ang = rand() * Math.PI * 2;
-    const rad = 13.8 + rand() * 2.8;
-    const x = Math.cos(ang) * rad;
-    const z = Math.sin(ang) * rad;
-    if (Math.abs(x) < 3.5 && z > 0) continue;
-    if (Math.hypot(x - 18, z - 3) < 8) continue;
-    if (tryTree(x, z, rand() < 0.6 ? 'blossom' : 'round')) placed++;
-  }
+  // --- Цветы: цветники у домов и цветочный луг ---
+  const flowerModel = createFlowers();
+  const toFlowerPlacement = (f) => ({ x: f.x, z: f.z, rotY: f.rotY, scale: f.scale });
+  addInstances(flowerModel, flowerSpots.map(toFlowerPlacement), { shadow: false });
+  addInstances(flowerModel, layout.flowers, { shadow: false });
 
-  for (const type of ['round', 'pine', 'blossom']) {
-    if (treeLists[type].length > 0) {
-      town.add(instanceModel(createTree({ type }), treeLists[type]));
+  // --- Торговая улица, гавань, квартал, пляж, роща, маяк: остальные модели ---
+  addInstances(createStall(), layout.stalls);
+  addInstances(createCrate(), layout.crates, { shadow: false });
+  addInstances(createBarrel(), layout.barrels, { shadow: false });
+  addInstances(createNetRack(), layout.nets, { shadow: false });
+  addInstances(createFence(), layout.fences, { shadow: false });
+  addInstances(createMailbox(), layout.mailboxes, { shadow: false });
+  addInstances(createMushrooms(), layout.mushrooms, { shadow: false });
+  addInstances(createRock(), layout.rocks, { shadow: false });
+  addInstances(createLounger(), layout.loungers, { shadow: false });
+  addInstances(createUmbrella(), layout.umbrellas);
+  addInstances(createBench(), layout.benches, { lift: -0.02, shadow: false });
+  addInstances(createStep(), layout.steps, { lift: -0.4, shadow: false });   // ступени наполовину в склоне
+  if (layout.swing) addInstances(createSwingTree(), [layout.swing], { lift: -0.05 });
+
+  // --- Пчёлы над цветочным лугом: маленькие жёлтые точки, днём ---
+  const bees = (() => {
+    const flowers = layout.flowers;
+    const count = Math.min(18, flowers.length);
+    const base = [];
+    for (let i = 0; i < count; i++) {
+      const f = flowers[Math.floor((i / count) * flowers.length)];
+      base.push({
+        x: f.x, z: f.z, y: groundHeight(f.x, f.z) + 0.75 + rand() * 0.6,
+        radius: 0.7 + rand() * 1.1, speed: 0.8 + rand() * 0.9, phase: rand() * Math.PI * 2,
+      });
+    }
+    const positions = new Float32Array(count * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const points = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xF2C14E, size: 0.2, map: makeGlowTexture('soft'), transparent: true, depthWrite: false,
+    }));
+    points.frustumCulled = false;
+    zoneGroups.get('meadow').add(points);
+    function update(t) {
+      for (let i = 0; i < count; i++) {
+        const b = base[i];
+        const a = t * b.speed + b.phase;
+        positions[i * 3] = b.x + Math.cos(a) * b.radius;
+        positions[i * 3 + 1] = b.y + Math.sin(a * 2.3) * 0.18;
+        positions[i * 3 + 2] = b.z + Math.sin(a * 1.3) * b.radius;
+      }
+      geo.attributes.position.needsUpdate = true;
+    }
+    return { points, update };
+  })();
+
+  // --- Дорожки от площади к каждой зоне ---
+  // Плитки не кладём в воду, под скамейки, деревья и дома и поверх уже лежащих плиток
+  const slopeAt = (x, z) => Math.hypot(
+    groundHeight(x + 0.5, z) - groundHeight(x - 0.5, z),
+    groundHeight(x, z + 0.5) - groundHeight(x, z - 0.5));
+  const segments = PATHS.map((path) => ({ id: path.id, columns: path.columns, lines: path.points.slice(0, -1).map((pt, i) => [pt, path.points[i + 1]]) }));
+  // дорожки от крылец квартала к улице (две плитки в ширину)
+  segments.push({ id: 'doors', columns: 2, lines: layout.doorPaths.map((d) => [[d.ax, d.az], [d.bx, d.bz]]) });
+  for (const path of segments) {
+    for (const [[ax, az], [bx, bz]] of path.lines) {
+      const segment = [];
+      addPath(segment, ax, az, bx, bz, path.columns);
+      for (const t of segment) {
+        if (groundHeight(t.x, t.z) < 0.3) continue;
+        if (path.id === 'to-lighthouse' && slopeAt(t.x, t.z) >= 0.22) continue; // на крутом месте лежат ступени
+        if (colliders.some((c) => insideCollider(c, t.x, t.z, 0.45))) continue;
+        if (tiles.some((o) => Math.hypot(o.x - t.x, o.z - t.z) < 0.6)) continue;
+        tiles.push(t);
+      }
     }
   }
 
-  // --- Цветочный луг на востоке и цветники у домов ---
-  const meadow = [];
-  for (let i = 0; i < 400 && meadow.length < 44; i++) {
-    const ang = rand() * Math.PI * 2;
-    const rad = Math.sqrt(rand()) * 5.5;
-    const x = 18 + Math.cos(ang) * rad;
-    const z = 3 + Math.sin(ang) * rad;
-    if (groundHeight(x, z) < 0.5) continue;
-    if (meadow.some((f) => Math.hypot(f.x - x, f.z - z) < 1.1)) continue;
-    meadow.push({ x, z, rotY: rand() * Math.PI * 2, scale: 0.8 + rand() * 0.5 });
-  }
-  const flowerPlacements = [...meadow, ...flowerSpots].map((f) => ({
-    x: f.x, y: groundHeight(f.x, f.z) - 0.02, z: f.z, rotY: f.rotY, scale: f.scale,
-  }));
-  town.add(instanceModel(createFlowers(), flowerPlacements));
+  // --- Плитки одним InstancedMesh. Каждая плитка ложится по наклону земли ---
+  const validTiles = tiles.filter((t) => Math.hypot(t.x, t.z) > PLAZA_R - 0.2 && groundHeight(t.x, t.z) > 0.3);
+  const tileMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.8, 0.06, 0.8),
+    new THREE.MeshStandardMaterial({ color: 0xFFFFFF, flatShading: true, roughness: 1 }),
+    validTiles.length
+  );
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const qYaw = new THREE.Quaternion();
+  const qTilt = new THREE.Quaternion();
+  const normal = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const one = new THREE.Vector3(1, 1, 1);
+  const up = new THREE.Vector3(0, 1, 0);
+  const colorA = new THREE.Color(COLORS.tileA);
+  const colorB = new THREE.Color(COLORS.tileB);
+  const e = 0.4;
+  validTiles.forEach((t, i) => {
+    normal.set(
+      groundHeight(t.x - e, t.z) - groundHeight(t.x + e, t.z),
+      2 * e,
+      groundHeight(t.x, t.z - e) - groundHeight(t.x, t.z + e)
+    ).normalize();
+    qTilt.setFromUnitVectors(up, normal);
+    qYaw.setFromAxisAngle(up, t.rot);
+    q.copy(qTilt).multiply(qYaw);
+    p.set(t.x, groundHeight(t.x, t.z) + 0.03, t.z);
+    m.compose(p, q, one);
+    tileMesh.setMatrixAt(i, m);
+    tileMesh.setColorAt(i, t.shade ? colorA : colorB);
+  });
+  tileMesh.instanceMatrix.needsUpdate = true;
+  if (tileMesh.instanceColor) tileMesh.instanceColor.needsUpdate = true;
+  tileMesh.receiveShadow = true;
+  tileMesh.frustumCulled = false;
+  town.add(tileMesh);
+
+  // --- Невидимая граница вдоль воды (последней, чтобы плитки её не учитывали) ---
+  const wallCount = addWaterWall(colliders);
+  console.log(`[Тихий Берег] остров: зон ${ZONES.length}, домов ${HOUSES.length + layout.houses.length}, лавок ${layout.stalls.length}, деревьев ${layout.trees.length}, плиток ${validTiles.length}, препятствий ${colliders.length} (из них границы ${wallCount})`);
 
   // --- Анимация: фонтан и лодка ---
   function update(t) {
@@ -912,30 +1208,43 @@ function createTown(scene) {
     jet.scale.y = 1 + 0.18 * Math.sin(t * 3.2);
     jet.scale.x = jet.scale.z = 1 + 0.08 * Math.sin(t * 4.1 + 1);
 
-    // Лодка качается вместе с волнами
-    const bx = boat.position.x;
-    const bz = boat.position.z;
-    const slopeZ = (waveHeight(bx, bz + 0.8, t) - waveHeight(bx, bz - 0.8, t)) / 1.6;
-    const slopeX = (waveHeight(bx + 0.6, bz, t) - waveHeight(bx - 0.6, bz, t)) / 1.2;
-    boat.position.y = waveHeight(bx, bz, t) - 0.14;
-    boat.rotation.x = -Math.atan(slopeZ) * 0.8;
-    boat.rotation.z = Math.atan(slopeX) * 0.8;
+    // Лодки качаются вместе с волнами
+    for (const boat of boats) {
+      const bx = boat.position.x;
+      const bz = boat.position.z;
+      const slopeZ = (waveHeight(bx, bz + 0.8, t) - waveHeight(bx, bz - 0.8, t)) / 1.6;
+      const slopeX = (waveHeight(bx + 0.6, bz, t) - waveHeight(bx - 0.6, bz, t)) / 1.2;
+      boat.position.y = waveHeight(bx, bz, t) - 0.14;
+      boat.rotation.x = -Math.atan(slopeZ) * 0.8;
+      boat.rotation.z = Math.atan(slopeX) * 0.8;
+    }
+    if (bees.points.visible) bees.update(t);
   }
 
   // --- Ночное свечение: level от 0 (день) до 1 (ночь) ---
   function setNight(level, t) {
     windowGlow.setLevel(level);
     lampGlow.setLevel(level, t);
+    bees.points.visible = level < 0.3;   // пчёлы летают только днём
   }
 
-  return { update, setNight, colliders };
+  // --- Дальние зоны не рисуем: смотрим на расстояние от героини до края зоны ---
+  function cull(focus) {
+    for (const zone of ZONES) {
+      const dist = Math.hypot(focus.x - zone.x, focus.z - zone.z) - zone.r;
+      zoneGroups.get(zone.id).visible = dist < CULL_DISTANCE;
+    }
+  }
+
+  return { update, setNight, cull, colliders, zoneGroups };
 }
 
 // ===== Собираем весь мир =====
 export function createWorld(scene) {
   scene.background = new THREE.Color(COLORS.skyHorizon);
-  // Туман того же цвета, что горизонт. Дальше 130 единиц всё тонет в дымке, краёв моря не видно.
-  scene.fog = new THREE.FogExp2(COLORS.skyHorizon, 0.008);
+  // Туман того же цвета, что горизонт. Над островом он редкий, а за берегом чуть гуще
+  // (густоту меняет applyTimeOfDay), поэтому край моря не виден.
+  scene.fog = new THREE.FogExp2(COLORS.skyHorizon, FOG_BASE);
 
   const sky = createSky();
   scene.add(sky.group);
@@ -952,10 +1261,31 @@ export function createWorld(scene) {
   scene.add(fireflies.points);
 
   const sunDir = new THREE.Vector3();
+  const lightRight = new THREE.Vector3();
+  const lightUp = new THREE.Vector3();
+  const shadowCenter = new THREE.Vector3();
+  const worldUp = new THREE.Vector3(0, 1, 0);
   const info = { dayTime: 0, night: 0, glow: 0, sunHeight: 0 };
+  const ORIGIN = { x: 0, z: 0 };
+
+  // Тени следуют за героиней. Центр сдвигаем «шагами» в одну клетку карты теней,
+  // иначе края теней дрожали бы при ходьбе.
+  function placeSun(offset, focus) {
+    const texel = (2 * SHADOW_R) / lights.sun.shadow.mapSize.x;
+    lightRight.crossVectors(worldUp, offset).normalize();
+    lightUp.crossVectors(offset, lightRight).normalize();
+    shadowCenter.set(focus.x, 0, focus.z);
+    const a = shadowCenter.dot(lightRight);
+    const b = shadowCenter.dot(lightUp);
+    shadowCenter
+      .addScaledVector(lightRight, Math.round(a / texel) * texel - a)
+      .addScaledVector(lightUp, Math.round(b / texel) * texel - b);
+    lights.sun.target.position.copy(shadowCenter);
+    lights.sun.position.copy(shadowCenter).add(offset);
+  }
 
   // Один раз за кадр: узнаём время суток и подстраиваем всё под него
-  function applyTimeOfDay(time) {
+  function applyTimeOfDay(time, focus) {
     const dayTime = currentDayTime();
     sampleDay(dayTime);
 
@@ -967,7 +1297,7 @@ export function createWorld(scene) {
     // Свет солнца (тени есть только днём; ночью яркость солнца падает до нуля)
     const elevation = 0.18 + 0.82 * Math.pow(Math.max(0, sinA), 0.8);
     sunDir.set(cosA, elevation, 0.33).normalize().multiplyScalar(65);
-    lights.sun.position.copy(sunDir);
+    placeSun(sunDir, focus);
     lights.sun.color.copy(cur.sun);
     lights.sun.intensity = cur.sunI;
 
@@ -981,8 +1311,9 @@ export function createWorld(scene) {
     lights.hemi.groundColor.copy(cur.hemiGround);
     lights.hemi.intensity = cur.hemiI;
 
-    // Туман и фон
+    // Туман и фон. Чем ближе героиня к берегу и дальше от центра, тем гуще туман.
     scene.fog.color.copy(cur.fog);
+    scene.fog.density = FOG_BASE + (FOG_SEA - FOG_BASE) * smoothstep(30, 50, Math.hypot(focus.x, focus.z));
     scene.background.copy(cur.horizon);
 
     // Небо, звёзды, солнце, луна
@@ -998,19 +1329,22 @@ export function createWorld(scene) {
     info.glow = glow;
     info.sunHeight = sinA;
   }
-  applyTimeOfDay(0); // правильные цвета уже в первом кадре
+  applyTimeOfDay(0, ORIGIN); // правильные цвета уже в первом кадре
 
   return {
     sky: sky.group,
-    colliders: town.colliders,         // что нельзя проходить насквозь
+    colliders: town.colliders,         // что нельзя проходить насквозь (в том числе берег)
     surfaceHeight,                     // высота земли с учётом пирса
+    groundHeight,                      // высота голой земли (без пирса): по ней видно, где вода
     canFish: (x, z) => { const g = groundHeight(x, z); const onPier = Math.abs(x - PIER.x) <= PIER.halfW + 0.7 && z >= PIER.z0 + 0.8 && z <= PIER.z0 + PIER.length; return onPier || (g >= 0.02 && g <= 0.42); },
     waterHeight: (x, z, t) => waveHeight(x, z, t),
     start: { x: 0, z: 7.2 },           // где появляется героиня
-    update: (time) => {
+    // focus — где сейчас героиня: вокруг неё следуют тени, по ней считается туман и отсечение дальних зон
+    update: (time, focus = ORIGIN) => {
       sea.update(time);
       town.update(time);
-      applyTimeOfDay(time);
+      town.cull(focus);
+      applyTimeOfDay(time, focus);
     },
     // Для проверки и для звука: сколько сейчас времени суток (0..1) и насколько ночь (0..1)
     getDayInfo: () => info,

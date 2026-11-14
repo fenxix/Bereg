@@ -1,4 +1,4 @@
-// main.js — сцена, атмосфера, рыбалка и интерфейс
+// main.js — сцена, атмосфера, рыбалка и интерфейс (остров из восьми зон: мир сам прячет дальние зоны, ему нужно знать, где героиня)
 import * as THREE from 'three';
 import { createWorld } from './world.js';
 import { createHeroine } from './models.js';
@@ -120,12 +120,25 @@ function makeFishingRod() {
   return group;
 }
 
+// Куда летит поплавок. Сначала смотрим от центра острова, а если там берег (на острове есть бухты и гавань),
+// поворачиваем по 15° в обе стороны, пока впереди не найдётся вода.
+const CAST_DISTANCE = 4.2;
 function castPoint() {
   const p = heroine.position;
+  const away = Math.atan2(p.z, p.x);
+  const step = Math.PI / 12;
+  for (let i = 0; i <= 12; i++) {
+    for (const sign of i === 0 ? [1] : [1, -1]) {
+      const a = away + sign * i * step;
+      const dx = Math.cos(a);
+      const dz = Math.sin(a);
+      const nearWater = world.groundHeight(p.x + dx * CAST_DISTANCE * 0.7, p.z + dz * CAST_DISTANCE * 0.7) < 0;
+      const farWater = world.groundHeight(p.x + dx * CAST_DISTANCE, p.z + dz * CAST_DISTANCE) < -0.3;
+      if (nearWater && farWater) return { x: p.x + dx * CAST_DISTANCE, z: p.z + dz * CAST_DISTANCE };
+    }
+  }
   const length = Math.max(0.001, Math.hypot(p.x, p.z));
-  const dx = p.x / length;
-  const dz = p.z / length;
-  return { x: p.x + dx * 4.2, z: p.z + dz * 4.2 };
+  return { x: p.x + (p.x / length) * CAST_DISTANCE, z: p.z + (p.z / length) * CAST_DISTANCE };
 }
 
 function startFishing(now) {
@@ -345,7 +358,7 @@ function loop(now) {
   player.update(dt);
   const position = heroine.position;
   const nearbyShell = shells.update(dt, position);
-  world.update(now / 1000);
+  world.update(now / 1000, position);   // position нужен миру: тени, туман и скрытие дальних зон считаются вокруг героини
   updateFishing(now, dt);
 
   if (fishing.mode === 'idle') {
@@ -383,7 +396,8 @@ function loop(now) {
 
   frames++;
   if (now - lastFps >= 500) {
-    document.getElementById('fps').textContent = 'FPS: ' + Math.round(frames * 1000 / (now - lastFps));
+    // вызовы отрисовки (включая тени): если FPS на телефоне низкий, это число подскажет, где тяжело
+    document.getElementById('fps').textContent = 'FPS: ' + Math.round(frames * 1000 / (now - lastFps)) + ' · ' + renderer.info.render.calls + ' выз.';
     frames = 0;
     lastFps = now;
   }

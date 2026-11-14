@@ -1,5 +1,6 @@
 // models.js — генераторы моделей (героиня, дом, дерево, фонарь, лодка, пирс, скамейка, цветы, фонтан)
-// и проверка checkModel
+// и модели для зон острова (лавка, ящик, бочка, сеть, домик рыбака, маяк, заборчик, почтовый ящик,
+// грибы, камень, ступень, шезлонг, зонтик, дерево с качелями) и проверка checkModel
 import * as THREE from 'three';
 
 // ===== Палитра цветов =====
@@ -213,7 +214,14 @@ export function instanceModel(model, placements) {
     inst.instanceMatrix.needsUpdate = true;
     inst.castShadow = true;
     inst.receiveShadow = true;
-    inst.frustumCulled = false;
+    // Копии за кадром не рисуем (ни самих, ни их тени): для этого считаем габарит всех копий сразу.
+    // Если в этой версии Three.js так нельзя, оставляем как раньше — рисуем всегда.
+    if (typeof inst.computeBoundingSphere === 'function') {
+      inst.computeBoundingSphere();
+      inst.frustumCulled = true;
+    } else {
+      inst.frustumCulled = false;
+    }
     result.add(inst);
   });
   return result;
@@ -822,5 +830,401 @@ export function createBoat() {
   group.userData.width = W;
 
   checkModel(group, 'Лодка');
+  return bakeStatic(group);
+}
+
+// =====================================================================
+//                       МОДЕЛИ ДЛЯ ЗОН ОСТРОВА
+// Все модели «лицом» смотрят в +z, стоят на y = 0, детали касаются друг друга.
+// =====================================================================
+
+// ===== Ящик: createCrate() =====
+export function createCrate() {
+  const S = 0.62;
+  const group = new THREE.Group();
+  group.name = 'ящик';
+  addBox(group, S, S, S, P.wood, 'ящик', 0, S / 2, 0);
+  addBox(group, S + 0.04, 0.1, S + 0.04, P.darkWood, 'обвязка низ', 0, 0.12, 0);
+  addBox(group, S + 0.04, 0.1, S + 0.04, P.darkWood, 'обвязка верх', 0, S - 0.12, 0);
+  addBox(group, S + 0.04, 0.05, S + 0.04, P.woodLight, 'крышка', 0, S + 0.005, 0);
+  checkModel(group, 'Ящик');
+  return bakeStatic(group);
+}
+
+// ===== Бочка: createBarrel() =====
+export function createBarrel() {
+  const HALF = 0.34;
+  const group = new THREE.Group();
+  group.name = 'бочка';
+  addPart(group, new THREE.CylinderGeometry(0.38, 0.3, HALF, 10), P.wood, 'низ бочки', 0, HALF / 2, 0);
+  addPart(group, new THREE.CylinderGeometry(0.3, 0.38, HALF, 10), P.wood, 'верх бочки', 0, HALF * 1.5, 0);
+  addPart(group, new THREE.CylinderGeometry(0.29, 0.29, 0.05, 10), P.woodLight, 'крышка', 0, HALF * 2 + 0.01, 0);
+  addPart(group, new THREE.CylinderGeometry(0.395, 0.395, 0.05, 10), P.darkWood, 'обруч середина', 0, HALF, 0);
+  addPart(group, new THREE.CylinderGeometry(0.335, 0.335, 0.05, 10), P.darkWood, 'обруч низ', 0, 0.1, 0);
+  addPart(group, new THREE.CylinderGeometry(0.335, 0.335, 0.05, 10), P.darkWood, 'обруч верх', 0, HALF * 2 - 0.1, 0);
+  checkModel(group, 'Бочка');
+  return bakeStatic(group);
+}
+
+// ===== Лавка с навесом: createStall(). Продавец за прилавком, покупатель со стороны +z =====
+// Центр модели — центр лавки, размер примерно 2,6 × 1,9
+export function createStall() {
+  const Z0 = 0.35;                       // сдвиг: центр лавки в нуле
+  const zz = (z) => z - Z0;
+  const POST = 0.1;
+  const BACK_H = 2.3, FRONT_H = 1.9;
+  const group = new THREE.Group();
+  group.name = 'лавка';
+
+  // Прилавок: тумба, столешница и яркая «юбка» спереди
+  addBox(group, 2.2, 0.9, 0.8, P.wood, 'прилавок', 0, 0.45, zz(0.35));
+  addBox(group, 2.4, 0.08, 1.0, P.woodLight, 'столешница', 0, 0.94, zz(0.35));
+  addBox(group, 2.0, 0.5, 0.04, P.accent, 'ткань на прилавке', 0, 0.5, zz(0.77));
+
+  // Стойки и задняя стенка с полкой
+  for (const sx of [-1, 1]) {
+    addBox(group, POST, BACK_H, POST, P.darkWood, 'стойка задняя', sx * 1.1, BACK_H / 2, zz(-0.55));
+    addBox(group, POST, FRONT_H, POST, P.darkWood, 'стойка передняя', sx * 1.1, FRONT_H / 2, zz(0.8));
+  }
+  addBox(group, 2.2, 1.5, 0.07, P.woodLight, 'задняя стенка', 0, 0.75 + 0.1, zz(-0.55));
+  addBox(group, 2.1, 0.06, 0.4, P.wood, 'полка', 0, 1.45, zz(-0.38));
+
+  // Товар на полке: коробочки
+  const jars = [P.accent, P.yellow, P.lilac, P.orange];
+  jars.forEach((color, i) => {
+    addBox(group, 0.3, 0.24, 0.26, color, 'банка', -0.75 + i * 0.5, 1.48 + 0.12, zz(-0.38));
+  });
+
+  // Товар на прилавке: ящик с фруктами и ящик с капустой
+  addBox(group, 0.6, 0.18, 0.42, P.woodLight, 'ящик с фруктами', -0.65, 0.98 + 0.09, zz(0.4));
+  [[-0.82, 0.32, P.roofCoral], [-0.65, 0.4, P.orange], [-0.48, 0.32, P.yellow], [-0.74, 0.5, P.roofCoral], [-0.56, 0.5, P.orange]]
+    .forEach(([x, z, color]) => {
+      addPart(group, new THREE.SphereGeometry(0.09, 6, 5), color, 'фрукт', x, 1.16 + 0.07, zz(z - 0.0));
+    });
+  addBox(group, 0.6, 0.18, 0.42, P.woodLight, 'ящик с зеленью', 0.65, 0.98 + 0.09, zz(0.4));
+  [[0.5, 0.35], [0.8, 0.35], [0.65, 0.5]].forEach(([x, z]) => {
+    addPart(group, new THREE.SphereGeometry(0.13, 6, 5), P.leaf, 'кочан', x, 1.16 + 0.1, zz(z));
+  });
+
+  // Навес: полосатая плита лежит на верхушках стоек (спереди ниже, чем сзади)
+  const dy = BACK_H - FRONT_H;
+  const dz = 1.35;
+  const tilt = Math.atan2(dy, dz);
+  const slabLen = Math.hypot(dy, dz) + 0.5;
+  const ux = 0;
+  const midY = (BACK_H + FRONT_H) / 2;
+  const midZ = zz(-0.55 + dz / 2);
+  const ucz = Math.cos(tilt);
+  const ucy = -Math.sin(tilt);
+  const cy = midY + ucy * 0.25 + 0.05;
+  const cz = midZ + ucz * 0.25;
+  const STRIPES = 6;
+  const stripeW = 2.6 / STRIPES;
+  for (let i = 0; i < STRIPES; i++) {
+    const color = i % 2 ? P.wallLight : P.roofCoral;
+    const x = -1.3 + stripeW * (i + 0.5);
+    const slab = addBox(group, stripeW, 0.07, slabLen, color, 'полоса навеса', x + ux, cy, cz);
+    slab.rotation.x = tilt;
+    // бахрома по переднему краю
+    const fy = cy + ucy * (slabLen / 2) - 0.1;
+    const fz = cz + ucz * (slabLen / 2);
+    addBox(group, stripeW, 0.14, 0.03, color, 'бахрома', x, fy, fz);
+  }
+
+  group.userData.footprint = { w: 2.6, d: 1.9 };
+  checkModel(group, 'Лавка');
+  return bakeStatic(group);
+}
+
+// ===== Сушилка для сетей: createNetRack(). Перекладина вдоль оси x =====
+export function createNetRack() {
+  const group = new THREE.Group();
+  group.name = 'сети';
+  for (const sx of [-1, 1]) {
+    addBox(group, 0.12, 2.0, 0.12, P.darkWood, 'стойка', sx * 1.2, 1.0, 0);
+    addBox(group, 0.3, 0.1, 0.3, P.darkWood, 'подпорка', sx * 1.2, 0.05, 0);
+  }
+  addBox(group, 2.6, 0.1, 0.1, P.darkWood, 'перекладина', 0, 1.95, 0);
+  addBox(group, 2.2, 1.1, 0.03, P.rope, 'сеть', 0, 1.42, 0);
+  // нити сети потемнее, чтобы было похоже на ячейки
+  for (let i = 0; i < 5; i++) {
+    addBox(group, 0.03, 1.1, 0.045, P.woodLight, 'нить', -0.88 + i * 0.44, 1.42, 0);
+  }
+  for (let i = 0; i < 2; i++) {
+    addBox(group, 2.2, 0.03, 0.045, P.woodLight, 'нить поперёк', 0, 1.1 + i * 0.5, 0);
+  }
+  // поплавки по нижнему краю
+  for (let i = 0; i < 5; i++) {
+    addPart(group, new THREE.SphereGeometry(0.1, 6, 5), P.roofCoral, 'поплавок',
+      -0.88 + i * 0.44, 0.88, 0);
+  }
+  checkModel(group, 'Сеть');
+  return bakeStatic(group);
+}
+
+// ===== Домик рыбака: createFisherHut(). Дверь на +z, размер около 3,4 × 3,0 =====
+export function createFisherHut() {
+  const W = 3.2, D = 2.8, WALL_H = 1.9, FOUND_H = 0.25, RH = 1.15;
+  const hw = W / 2, hd = D / 2;
+  const group = new THREE.Group();
+  group.name = 'домик рыбака';
+
+  addBox(group, W + 0.16, FOUND_H, D + 0.16, P.stone, 'основание', 0, FOUND_H / 2, 0);
+  addBox(group, W, WALL_H, D, P.woodLight, 'стены', 0, FOUND_H + WALL_H / 2 - 0.02, 0);
+  const wallTop = FOUND_H + WALL_H - 0.02;
+
+  // Дверь с наличником и ручкой, ступенька
+  addBox(group, 1.0, 1.55, 0.05, P.darkWood, 'наличник двери', 0.5, FOUND_H + 0.775, hd + 0.01);
+  addBox(group, 0.8, 1.45, 0.08, P.wood, 'дверь', 0.5, FOUND_H + 0.725, hd + 0.02);
+  addPart(group, new THREE.SphereGeometry(0.045, 6, 5), P.gold, 'ручка двери', 0.72, FOUND_H + 0.75, hd + 0.08);
+  addBox(group, 1.3, 0.14, 0.4, P.stoneDark, 'ступенька', 0.5, 0.07, hd + 0.3);
+
+  // Окна: спереди слева и по бокам
+  addWindow(group, -0.85, FOUND_H + 1.05, hd, 0, true);
+  addWindow(group, hw, FOUND_H + 1.05, 0, Math.PI / 2);
+  addWindow(group, -hw, FOUND_H + 1.05, 0, -Math.PI / 2);
+
+  addGableRoof(group, hw, D, wallTop, RH, P.roofBlue, P.woodLight, 0);
+
+  // Труба
+  addBox(group, 0.4, 1.3, 0.4, P.brick, 'труба', 0.9, wallTop + 0.2, -0.5);
+  addBox(group, 0.54, 0.08, 0.54, P.stone, 'шапка трубы', 0.9, wallTop + 0.88, -0.5);
+
+  // Два буйка у стены и якорь-«скамейка»: бочонок и поплавок
+  addPart(group, new THREE.SphereGeometry(0.2, 7, 6), P.roofCoral, 'буй', hw + 0.28, 0.2, hd - 0.4);
+  addPart(group, new THREE.SphereGeometry(0.16, 7, 6), P.wallLight, 'буй малый', hw + 0.26, 0.16, hd - 0.72);
+
+  group.userData.footprint = { w: W + 0.16, d: D + 0.16 };
+  checkModel(group, 'Домик рыбака');
+  return bakeStatic(group);
+}
+
+// ===== Маяк: createLighthouse(). Дверь на +z. Высота около 11 =====
+export function createLighthouse() {
+  const group = new THREE.Group();
+  group.name = 'маяк';
+  const OVERLAP = 0.03;
+
+  // Каменное основание
+  const BASE_H = 0.35;
+  addPart(group, new THREE.CylinderGeometry(1.9, 2.0, BASE_H, 12), P.stone, 'основание', 0, BASE_H / 2, 0);
+
+  // Башня: четыре полосатых яруса, каждый чуть уже предыдущего
+  const SEGMENTS = [
+    { rb: 1.55, rt: 1.35, h: 2.2, color: P.wallLight },
+    { rb: 1.35, rt: 1.2, h: 2.0, color: P.roofCoral },
+    { rb: 1.2, rt: 1.05, h: 2.0, color: P.wallLight },
+    { rb: 1.05, rt: 0.95, h: 1.6, color: P.roofCoral },
+  ];
+  const ranges = [];
+  let y = BASE_H - OVERLAP;
+  for (const seg of SEGMENTS) {
+    addPart(group, new THREE.CylinderGeometry(seg.rt, seg.rb, seg.h, 12), seg.color, 'ярус башни', 0, y + seg.h / 2, 0);
+    ranges.push({ y0: y, y1: y + seg.h, rb: seg.rb, rt: seg.rt });
+    y += seg.h - OVERLAP;
+  }
+  const towerTop = y + OVERLAP;
+  const radiusAt = (yy) => {
+    const r = ranges.find((q) => yy >= q.y0 && yy <= q.y1) || ranges[ranges.length - 1];
+    return r.rb + (r.rt - r.rb) * ((yy - r.y0) / (r.y1 - r.y0));
+  };
+
+  // Дверь с наличником
+  addBox(group, 1.0, 1.7, 0.08, P.darkWood, 'наличник двери', 0, BASE_H + 0.8, radiusAt(BASE_H + 0.8) - 0.02);
+  addBox(group, 0.85, 1.6, 0.1, P.wood, 'дверь', 0, BASE_H + 0.75, radiusAt(BASE_H + 0.75));
+  addPart(group, new THREE.SphereGeometry(0.05, 6, 5), P.gold, 'ручка двери', 0.25, BASE_H + 0.8, radiusAt(BASE_H + 0.8) + 0.07);
+  addBox(group, 1.6, 0.14, 0.5, P.stoneDark, 'ступенька', 0, BASE_H - 0.18, radiusAt(BASE_H) + 0.42);
+
+  // Окошки на разных сторонах башни
+  [[3.1, 0.95], [4.9, -1.25], [6.5, 2.3], [2.4, -2.2]].forEach(([wy, phi]) => {
+    const r = radiusAt(wy);
+    const sx = Math.sin(phi);
+    const cz = Math.cos(phi);
+    const frame = addBox(group, 0.44, 0.7, 0.1, P.darkWood, 'рама окна', sx * (r - 0.03), wy, cz * (r - 0.03));
+    frame.rotation.y = phi;
+    const glass = addBox(group, 0.3, 0.55, 0.1, P.glass, 'стекло', sx * (r + 0.01), wy, cz * (r + 0.01));
+    glass.rotation.y = phi;
+  });
+
+  // Галерея с перилами
+  const GALLERY_H = 0.22;
+  const galleryY = towerTop - 0.06;
+  addPart(group, new THREE.CylinderGeometry(1.5, 1.35, GALLERY_H, 12), P.stoneDark, 'галерея', 0, galleryY + GALLERY_H / 2, 0);
+  const floorY = galleryY + GALLERY_H;
+  const RAIL_R = 1.4, RAIL_H = 0.55;
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    addBox(group, 0.07, RAIL_H, 0.07, P.darkWood, 'столбик перил', Math.cos(a) * RAIL_R, floorY + RAIL_H / 2 - 0.02, Math.sin(a) * RAIL_R);
+  }
+  const rail = addPart(group, new THREE.TorusGeometry(RAIL_R, 0.035, 5, 20), P.wood, 'поручень', 0, floorY + RAIL_H - 0.04, 0);
+  rail.rotation.x = Math.PI / 2;
+
+  // Фонарная комната: светящееся стекло и тёмные стойки
+  const LANTERN_H = 1.05;
+  addMeshWithMaterial(group, new THREE.CylinderGeometry(0.62, 0.62, LANTERN_H, 8), getGlowMaterial(P.lantern),
+    'фонарь маяка', 0, floorY + LANTERN_H / 2 - 0.02, 0);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    addBox(group, 0.07, LANTERN_H + 0.04, 0.07, P.darkWood, 'стойка фонаря', Math.cos(a) * 0.63, floorY + LANTERN_H / 2 - 0.02, Math.sin(a) * 0.63);
+  }
+  const lanternTop = floorY + LANTERN_H - 0.02;
+  addPart(group, new THREE.CylinderGeometry(0.85, 0.85, 0.12, 8), P.darkWood, 'карниз фонаря', 0, lanternTop + 0.04, 0);
+  const roofH = 0.8;
+  addPart(group, new THREE.ConeGeometry(0.95, roofH, 8), P.roofCoral, 'крыша маяка', 0, lanternTop + 0.1 + roofH / 2 - 0.04, 0);
+  addPart(group, new THREE.SphereGeometry(0.1, 6, 5), P.gold, 'шарик', 0, lanternTop + 0.06 + roofH, 0);
+
+  group.userData.footprint = { w: 4, d: 4 };
+  checkModel(group, 'Маяк');
+  return bakeStatic(group);
+}
+
+// ===== Заборчик (одна секция 1,6 в длину вдоль x): createFence() =====
+export function createFence() {
+  const group = new THREE.Group();
+  group.name = 'заборчик';
+  for (const sx of [-1, 1]) {
+    addBox(group, 0.1, 0.85, 0.1, P.woodLight, 'столбик', sx * 0.75, 0.425, 0);
+  }
+  for (const ry of [0.28, 0.6]) {
+    addBox(group, 1.6, 0.07, 0.05, P.woodLight, 'перекладина', 0, ry, 0);
+  }
+  for (let i = 0; i < 6; i++) {
+    addBox(group, 0.11, 0.62, 0.04, P.wallLight, 'штакетина', -0.55 + i * 0.22, 0.4, 0.045);
+  }
+  checkModel(group, 'Заборчик');
+  return bakeStatic(group);
+}
+
+// ===== Почтовый ящик на столбике: createMailbox(). Дверца на +z =====
+export function createMailbox() {
+  const group = new THREE.Group();
+  group.name = 'почтовый ящик';
+  addBox(group, 0.08, 0.85, 0.08, P.darkWood, 'столбик', 0, 0.425, 0);
+  addBox(group, 0.4, 0.06, 0.4, P.wood, 'подставка', 0, 0.86, 0);
+  addBox(group, 0.36, 0.26, 0.5, P.roofBlue, 'ящик', 0, 1.0, 0);
+  addBox(group, 0.3, 0.05, 0.44, P.roofCoral, 'крышка', 0, 1.15, 0);
+  addBox(group, 0.2, 0.03, 0.04, P.darkWood, 'щель', 0, 1.02, 0.26);
+  addBox(group, 0.03, 0.2, 0.03, P.darkWood, 'флажок', 0.2, 1.1, -0.05);
+  addBox(group, 0.12, 0.08, 0.03, P.accent, 'флажок-полотнище', 0.25, 1.18, -0.05);
+  checkModel(group, 'Почтовый ящик');
+  return bakeStatic(group);
+}
+
+// ===== Грибы: createMushrooms() — один большой и два маленьких =====
+export function createMushrooms() {
+  const group = new THREE.Group();
+  group.name = 'грибы';
+  const spec = [
+    { x: 0, z: 0, stem: 0.24, r: 0.2, color: P.roofCoral },
+    { x: 0.3, z: 0.1, stem: 0.15, r: 0.13, color: P.accent },
+    { x: -0.2, z: 0.22, stem: 0.12, r: 0.1, color: P.roofCoral },
+  ];
+  for (const m of spec) {
+    addPart(group, new THREE.CylinderGeometry(m.r * 0.38, m.r * 0.45, m.stem, 6), P.wallLight, 'ножка', m.x, m.stem / 2, m.z);
+    const cap = addPart(group, new THREE.SphereGeometry(m.r, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), m.color, 'шляпка',
+      m.x, m.stem - 0.02, m.z);
+    cap.scale.y = 0.75;
+    [[0.35, 0.3], [-0.4, 0.15], [0.05, -0.45]].forEach(([dx, dz]) => {
+      const px = dx * m.r;
+      const pz = dz * m.r;
+      const h = Math.sqrt(Math.max(0, 1 - dx * dx - dz * dz)) * m.r * 0.75;
+      addPart(group, new THREE.SphereGeometry(m.r * 0.16, 5, 4), P.white, 'пятнышко', m.x + px, m.stem - 0.02 + h, m.z + pz);
+    });
+  }
+  checkModel(group, 'Грибы');
+  return bakeStatic(group);
+}
+
+// ===== Камень: createRock() — большой валун и маленький рядом =====
+export function createRock() {
+  const group = new THREE.Group();
+  group.name = 'камень';
+  addPart(group, new THREE.CylinderGeometry(0.42, 0.55, 0.4, 6), P.stoneDark, 'валун низ', 0, 0.2, 0);
+  addPart(group, new THREE.CylinderGeometry(0.2, 0.36, 0.3, 6), P.stone, 'валун верх', 0.04, 0.52, -0.02);
+  addPart(group, new THREE.CylinderGeometry(0.2, 0.27, 0.24, 5), P.stoneDark, 'камешек', 0.65, 0.12, 0.1);
+  checkModel(group, 'Камень');
+  return bakeStatic(group);
+}
+
+// ===== Ступень лестницы: createStep(). Длинная сторона по x (поперёк дорожки) =====
+// Нижняя часть закопана в склон, поэтому в воздухе она не повисает
+export function createStep() {
+  const group = new THREE.Group();
+  group.name = 'ступень';
+  addBox(group, 1.9, 0.5, 0.6, P.stoneDark, 'ступень', 0, 0.25, 0);
+  addBox(group, 1.96, 0.08, 0.64, P.stone, 'верх ступени', 0, 0.46, 0);
+  checkModel(group, 'Ступень');
+  return bakeStatic(group);
+}
+
+// ===== Шезлонг: createLounger(). Спинка сзади (в -z), лицом смотрит в +z =====
+export function createLounger() {
+  const group = new THREE.Group();
+  group.name = 'шезлонг';
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      addBox(group, 0.06, 0.28, 0.06, P.darkWood, 'ножка', sx * 0.3, 0.14, sz * 0.45);
+    }
+  }
+  // Сиденье: три полосы
+  const stripe = 1.0 / 3;
+  for (let i = 0; i < 3; i++) {
+    addBox(group, 0.7, 0.07, stripe, i % 2 ? P.wallLight : P.roofCoral, 'сиденье', 0, 0.31, -0.5 + stripe * (i + 0.5));
+  }
+  // Спинка на «шарнире» у заднего края сиденья
+  const seatTop = 0.31 + 0.035;
+  const back = addJoint(group, 'спинка', 0, seatTop, -0.5);
+  back.rotation.x = 0.95;
+  const SL = 0.27;
+  for (let i = 0; i < 3; i++) {
+    addBox(back, 0.7, 0.07, SL, i % 2 ? P.wallLight : P.roofCoral, 'спинка-полоса', 0, 0.035, -(i + 0.5) * SL);
+  }
+  checkModel(group, 'Шезлонг');
+  return bakeStatic(group);
+}
+
+// ===== Пляжный зонтик: createUmbrella() =====
+export function createUmbrella() {
+  const POLE_H = 2.3;
+  const group = new THREE.Group();
+  group.name = 'зонтик';
+  addPart(group, new THREE.CylinderGeometry(0.3, 0.34, 0.1, 8), P.stoneDark, 'подставка', 0, 0.05, 0);
+  addPart(group, new THREE.CylinderGeometry(0.035, 0.035, POLE_H, 6), P.darkWood, 'шест', 0, POLE_H / 2, 0);
+  // Купол из четырёх долек: две коралловые и две белые
+  const CONE_H = 0.55;
+  for (let k = 0; k < 4; k++) {
+    const wedge = new THREE.ConeGeometry(1.35, CONE_H, 2, 1, false, (k * Math.PI) / 2, Math.PI / 2);
+    addPart(group, wedge, k % 2 ? P.wallLight : P.roofCoral, 'долька купола', 0, POLE_H - 0.1 + CONE_H / 2, 0, true);
+  }
+  addPart(group, new THREE.SphereGeometry(0.07, 6, 5), P.gold, 'навершие', 0, POLE_H - 0.1 + CONE_H, 0);
+  checkModel(group, 'Зонтик');
+  return bakeStatic(group);
+}
+
+// ===== Дерево с качелями: createSwingTree(). Ветка с качелями уходит в +x =====
+export function createSwingTree() {
+  const group = new THREE.Group();
+  group.name = 'дерево с качелями';
+  const TRUNK_H = 2.7;
+  addPart(group, new THREE.CylinderGeometry(0.2, 0.3, TRUNK_H, 7), P.darkWood, 'ствол', 0, TRUNK_H / 2, 0);
+  addPart(group, new THREE.IcosahedronGeometry(1.6, 1), P.blossom, 'крона', 0, TRUNK_H + 0.8, 0);
+  addPart(group, new THREE.IcosahedronGeometry(1.1, 1), P.blossomLight, 'крона малая', -1.0, TRUNK_H + 0.2, -0.3);
+
+  // Толстая ветка в сторону
+  const BRANCH_LEN = 2.4, BRANCH_Y = 2.35;
+  const branch = addPart(group, new THREE.CylinderGeometry(0.09, 0.14, BRANCH_LEN, 6), P.darkWood, 'ветка',
+    BRANCH_LEN / 2, BRANCH_Y, 0);
+  branch.rotation.z = Math.PI / 2;
+
+  // Две верёвки и доска-сиденье
+  const ROPE_X = 2.0, ROPE_LEN = 1.7;
+  const ropeTop = BRANCH_Y - 0.06;
+  for (const sz of [-1, 1]) {
+    addPart(group, new THREE.CylinderGeometry(0.02, 0.02, ROPE_LEN, 5), P.rope, 'верёвка',
+      ROPE_X, ropeTop - ROPE_LEN / 2, sz * 0.3);
+  }
+  addBox(group, 0.3, 0.06, 0.75, P.woodLight, 'сиденье качелей', ROPE_X, ropeTop - ROPE_LEN + 0.0, 0);
+
+  checkModel(group, 'Дерево с качелями');
   return bakeStatic(group);
 }
