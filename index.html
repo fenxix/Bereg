@@ -12,13 +12,62 @@
   <meta name="apple-mobile-web-app-title" content="Тихий Берег">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Тихий Берег</title>
+  <link rel="preload" as="image" href="menu-bg.webp">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 </head>
-<body>
+<body class="in-menu">
   <div id="game"></div>
+  <div id="menu" role="dialog" aria-label="Главное меню">
+    <section id="menu-home" class="menu-screen">
+      <div class="menu-column">
+        <div class="menu-sign"><span class="menu-title">Тихий<br>Берег</span></div>
+        <nav class="menu-buttons">
+          <button id="menu-play" class="menu-btn" type="button" disabled><span class="menu-ic"><img src="icon-shell.webp" alt=""></span><span class="menu-label">Загрузка…</span></button>
+          <button id="menu-help-open" class="menu-btn" type="button"><span class="menu-ic"><img src="icon-fish.webp" alt=""></span><span class="menu-label">Как играть</span></button>
+          <button id="menu-settings-open" class="menu-btn" type="button"><span class="menu-ic"><img src="icon-gear.webp" alt=""></span><span class="menu-label">Настройки</span></button>
+        </nav>
+      </div>
+    </section>
+    <section id="menu-help" class="menu-screen" hidden>
+      <div class="menu-card">
+        <h2>Как играть</h2>
+        <ul class="help-list">
+          <li><span><b>Идти.</b> Джойстик слева или WASD и стрелки. Shift — бежать.</span></li>
+          <li><span><b>Камера.</b> Проведи пальцем по экрану или двигай мышь.</span></li>
+          <li><span><b>Действие.</b> Кнопка на экране или клавиша E.</span></li>
+          <li class="has-ic"><img class="help-ic" src="icon-fish.webp" alt=""><span><b>Рыбалка.</b> Встань у воды и закинь удочку. Когда поплавок дёрнется, быстро нажми «Подсечь!».</span></li>
+          <li class="has-ic"><img class="help-ic" src="icon-shell.webp" alt=""><span><b>Ракушки.</b> Подойди к ракушке и возьми её. Редкие стоят дороже.</span></li>
+          <li><span><b>Сумка.</b> Кнопка 🎒 сверху: продавай улов, покупай удочки, расширяй сумку.</span></li>
+        </ul>
+        <button class="menu-btn menu-btn-small" type="button" data-back><span class="menu-label">Назад</span></button>
+      </div>
+    </section>
+    <section id="menu-settings" class="menu-screen" hidden>
+      <div class="menu-card">
+        <h2>Настройки</h2>
+        <div class="set-row">
+          <img class="help-ic" src="icon-sound.webp" alt="">
+          <div class="set-text"><b>Звук</b><small>Звука в игре пока нет, выбор сохранится на будущее</small></div>
+          <button class="toggle" type="button" data-toggle="sound"></button>
+        </div>
+        <div class="set-row">
+          <span class="set-badge">FPS</span>
+          <div class="set-text"><b>Показывать FPS</b><small>Счётчик кадров вверху экрана</small></div>
+          <button class="toggle" type="button" data-toggle="fps"></button>
+        </div>
+        <div class="set-row">
+          <span class="set-badge">HD</span>
+          <div class="set-text"><b>Качество картинки</b><small>«Лёгкое» помогает слабому телефону</small></div>
+          <div class="seg"><button type="button" data-quality="low">Лёгкое</button><button type="button" data-quality="high">Красивое</button></div>
+        </div>
+        <button class="menu-btn menu-btn-small" type="button" data-back><span class="menu-label">Назад</span></button>
+      </div>
+    </section>
+  </div>
   <aside id="file-warning" hidden><strong>Запустите игру через локальный сервер</strong><p>Для ES-модулей и Three.js браузеру нужен адрес http://localhost, прямое открытие файла блокирует скрипты.</p><p>Закройте эту вкладку и запустите файл <code>start-game.bat</code> в папке игры.</p></aside>
   <header id="hud">
+    <button id="menu-open" type="button" aria-label="Меню">☰ Меню</button>
     <h1>Тихий Берег</h1>
     <div id="time-card"><span id="time-icon">🌅</span><span><strong id="clock-time">06:00</strong><small id="day-phase">Рассвет</small></span></div><span id="rod-status">🎣 Бамбуковая удочка</span><div class="wallet"><span id="coins">🪙 0</span><span id="pearls">🐚 0</span></div>
     <button id="bag-toggle" type="button" aria-label="Открыть сумку">🎒 <span id="bag-count">0/12</span></button>
@@ -33,6 +82,7 @@
   <div id="toast" role="status"></div>
   <p id="hint">WASD или стрелки — идти · Shift — бежать · мышь — камера · E — действие</p>
   <div id="joystick"><div id="stick"></div></div>
+  <div id="rotate-hint" aria-hidden="true"><div class="rotate-phone"></div><p>Поверни телефон боком</p></div>
   <script>if (location.protocol === "file:") document.getElementById("file-warning").hidden = false;</script>
   <script>if ("serviceWorker" in navigator && location.protocol !== "file:") window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));</script>
   <script type="module" src="main.js"></script>

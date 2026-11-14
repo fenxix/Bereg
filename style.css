@@ -148,3 +148,64 @@ body {
 #hud{gap:9px;z-index:2}
 @media(max-width:720px){#hud{flex-wrap:wrap;justify-content:space-between;gap:6px}#time-card{order:2;min-width:0;padding:5px 10px}#rod-status{display:none}.wallet{order:3}#bag-toggle{order:4}#fps{order:5}#hud h1{order:1}}
 @media(max-width:430px){#time-card{position:absolute;top:49px;left:12px}#action.bite{animation-name:bitePulseMobile}@keyframes bitePulseMobile{from{transform:scale(1)}to{transform:scale(1.08)}}}
+
+/* ===== Главное меню (игра идёт боком, меню тоже) ===== */
+#menu{--u:1vh;position:fixed;inset:0;z-index:10;overflow:hidden;background:#f6b98f url(menu-bg.webp) 40% 60%/cover no-repeat;color:#4a2a1e;font-family:ui-rounded,"Trebuchet MS",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;transition:opacity .45s ease,visibility 0s linear 0s}
+@supports (height:1dvh){#menu{--u:1dvh}}
+body:not(.in-menu) #menu{opacity:0;visibility:hidden;pointer-events:none;transition:opacity .45s ease,visibility 0s linear .45s}
+
+/* пока открыто меню, игровой интерфейс спрятан */
+body.in-menu #hud,body.in-menu #joystick,body.in-menu #hint,body.in-menu #action,body.in-menu #fishing-status,body.in-menu #toast,body.in-menu #bag{display:none !important}
+.hide-fps #fps{display:none}
+
+.menu-screen{position:absolute;inset:0;display:flex;align-items:center;padding:max(12px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.menu-screen[hidden]{display:none}
+#menu-home{justify-content:flex-start;padding-left:max(5vw,env(safe-area-inset-left,0px))}
+
+.menu-column{--bh:clamp(44px,calc(var(--u)*13),76px);--sign-w:clamp(150px,calc(var(--u)*50),330px);display:flex;flex-direction:column;align-items:center;gap:clamp(6px,calc(var(--u)*2),16px)}
+.menu-buttons{display:flex;flex-direction:column;align-items:center;gap:clamp(4px,calc(var(--u)*1.4),12px)}
+
+.menu-sign{width:var(--sign-w);aspect-ratio:640/340;background:url(menu-sign.webp) center/100% 100% no-repeat;display:grid;place-items:center;padding-top:7%;filter:drop-shadow(0 6px 10px rgba(74,34,40,.28))}
+.menu-title{font-weight:800;font-size:calc(var(--sign-w)*.165);line-height:.98;text-align:center;color:#fff4e3;letter-spacing:.02em;-webkit-text-stroke:calc(var(--sign-w)*.014) #5a2218;paint-order:stroke fill;text-shadow:0 2px 0 #5a2218}
+
+.menu-btn{display:flex;align-items:center;gap:calc(var(--bh)*.1);width:calc(var(--bh)*4.8);height:var(--bh);padding:calc(var(--bh)*.12) calc(var(--bh)*.3) 0 calc(var(--bh)*.3);border:0;background:url(menu-button.webp) center/100% 100% no-repeat;color:#4a2a1e;font-family:inherit;font-weight:800;font-size:calc(var(--bh)*.36);line-height:1;text-shadow:0 1px 0 rgba(255,236,200,.75);cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;filter:drop-shadow(0 4px 5px rgba(74,34,40,.28));transition:transform .12s,filter .12s}
+.menu-btn:hover{filter:drop-shadow(0 4px 5px rgba(74,34,40,.28)) brightness(1.07)}
+.menu-btn:active{transform:scale(.96)}
+.menu-btn:disabled{cursor:default;filter:drop-shadow(0 4px 5px rgba(74,34,40,.2)) grayscale(.35) brightness(.96)}
+.menu-btn:focus-visible,.toggle:focus-visible,.seg button:focus-visible{outline:3px solid #fff4e3;outline-offset:2px}
+.menu-ic{flex:none;width:calc(var(--bh)*.56);height:calc(var(--bh)*.56);display:grid;place-items:center;border-radius:50%;background:#fff4e3;border:2px solid #5a2218}
+.menu-ic img{width:74%;height:74%;object-fit:contain}
+.menu-label{flex:1;text-align:center;white-space:nowrap}
+.menu-btn-small{--bh:clamp(40px,calc(var(--u)*11),58px);justify-content:center;padding-left:calc(var(--bh)*.3);align-self:center;flex:none}
+.menu-btn-small .menu-label{flex:none}
+
+/* карточки «Как играть» и «Настройки» */
+.menu-card{margin:auto;width:min(640px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:clamp(8px,calc(var(--u)*1.8),14px);padding:clamp(12px,calc(var(--u)*3),22px) clamp(14px,3vw,26px);border:3px solid #5a2218;border-radius:20px;background:rgba(255,248,236,.96);box-shadow:0 12px 40px rgba(74,34,40,.35)}
+.menu-card h2{text-align:center;font-size:clamp(20px,calc(var(--u)*5.5),30px)}
+.help-list{list-style:none;display:grid;gap:clamp(5px,calc(var(--u)*1.3),10px);font-size:clamp(13px,calc(var(--u)*3.8),16px);line-height:1.35}
+.help-list li{display:flex;gap:10px;align-items:flex-start}
+.help-list li::before{content:"";flex:none;width:22px;height:22px;margin-top:1px;border-radius:50%;background:#f4a6b8}
+.help-list li.has-ic::before{display:none}
+.help-ic{flex:none;width:28px;height:28px;object-fit:contain}
+.help-list .help-ic{width:22px;height:22px;margin-top:1px}
+
+.set-row{display:flex;align-items:center;gap:12px}
+.set-badge{flex:none;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#f4a6b8;color:#4a2a1e;font-size:9px;font-weight:800}
+.set-text{flex:1;min-width:0;display:grid;gap:1px}
+.set-text b{font-size:clamp(14px,calc(var(--u)*4),17px)}
+.set-text small{font-size:clamp(11px,calc(var(--u)*3.2),13px);color:#80675b;line-height:1.25}
+.toggle,.seg button{border:0;border-radius:999px;padding:8px 14px;background:#f0dfcf;color:#5b3a2e;font:700 14px ui-rounded,system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
+.toggle{min-width:70px}
+.seg{display:flex;gap:4px;padding:3px;border-radius:999px;background:#f0dfcf}
+.seg button{background:transparent;padding:7px 12px}
+.toggle[aria-pressed="true"],.seg button[aria-pressed="true"]{background:#f4a6b8;box-shadow:inset 0 0 0 2px #5a2218}
+
+/* кнопка «Меню» в игре */
+#menu-open{pointer-events:auto;cursor:pointer;border:0;padding:7px 12px;border-radius:999px;background:rgba(255,248,236,.92);color:#5B3A2E;font:700 14px system-ui;touch-action:manipulation}
+@media(max-width:600px){#menu-open{font-size:12px;padding:7px 8px}}
+
+/* телефон стоит вертикально: просим повернуть (игра и меню идут боком) */
+#rotate-hint{display:none;position:fixed;inset:0;z-index:15;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:linear-gradient(#ffd9b8,#f4a6b8);color:#5b3a2e;font:700 20px ui-rounded,system-ui,sans-serif;text-align:center;padding:24px}
+@media (orientation:portrait) and (pointer:coarse){#rotate-hint{display:flex}}
+.rotate-phone{width:46px;height:78px;border:5px solid #5a2218;border-radius:12px;background:#fff4e3;animation:rotatePhone 2.4s ease-in-out infinite}
+@keyframes rotatePhone{0%,25%{transform:rotate(0)}60%,100%{transform:rotate(90deg)}}

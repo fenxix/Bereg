@@ -5,6 +5,7 @@ import { createHeroine } from './models.js';
 import { createPlayer } from './player.js';
 import { createShells } from './shells.js';
 import { createEconomy, ITEMS } from './economy.js';
+import { createMenu } from './menu.js';
 
 const container = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -18,6 +19,32 @@ container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
+
+// Главное меню. Пока оно открыто, игра стоит на паузе (ничего не считаем и не рисуем).
+let playing = false;
+let pausedAt = 0;
+function applySettings(settings) {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.quality === 'low' ? 1 : 1.6));
+  onResize();
+}
+const menu = createMenu({
+  onSettingsChange: applySettings,
+  onPlay() {
+    if (pausedAt) {
+      // время паузы не должно съедать поклёвку: сдвигаем таймеры рыбалки
+      const gap = performance.now() - pausedAt;
+      if (fishing.mode !== 'idle') for (const key of ['started', 'castEnds', 'biteAt', 'biteUntil']) fishing[key] += gap;
+      pausedAt = 0;
+    }
+    frames = 0;
+    lastFps = performance.now();
+    playing = true;
+  },
+  onPause() {
+    playing = false;
+    pausedAt = performance.now();
+  },
+});
 const world = createWorld(scene);
 const heroine = createHeroine();
 scene.add(heroine);
@@ -224,6 +251,7 @@ function landFish(item) {
 }
 
 function performAction() {
+  if (!playing) return;
   // Активный клёв важнее ракушек рядом: кнопка «Подсечь» всегда делает именно подсечку.
   if (fishing.mode === 'bite') {
     if (performance.now() <= fishing.biteUntil) {
@@ -354,6 +382,7 @@ function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min((now - previous) / 1000, 0.05);
   previous = now;
+  if (!playing) return;
 
   player.update(dt);
   const position = heroine.position;
@@ -403,4 +432,5 @@ function loop(now) {
   }
 }
 refreshBag();
+menu.setReady();
 requestAnimationFrame(loop);

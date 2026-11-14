@@ -1,4 +1,4 @@
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "tihiy-bereg-" + VERSION;
 
 const PRECACHE = [
@@ -6,6 +6,7 @@ const PRECACHE = [
   "./index.html",
   "./style.css",
   "./main.js",
+  "./menu.js",
   "./economy.js",
   "./models.js",
   "./player.js",
@@ -18,6 +19,13 @@ const PRECACHE = [
   "./maskable-192.png",
   "./maskable-512.png",
   "./apple-touch-icon.png",
+  "./menu-bg.webp",
+  "./menu-sign.webp",
+  "./menu-button.webp",
+  "./icon-shell.webp",
+  "./icon-fish.webp",
+  "./icon-gear.webp",
+  "./icon-sound.webp",
   "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
 ];
 
