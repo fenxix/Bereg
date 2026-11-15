@@ -1,6 +1,7 @@
 // shells.js — физика ракушек: падают, подпрыгивают и спокойно лежат на песке
 import * as THREE from 'three';
-const WANT = 12;
+import { RESOURCE_RULES, sampleZonePoint } from './zones.js';
+const WANT = RESOURCE_RULES.shells.count;
 const PICKUP_R = 1.35;
 function makeRandom(seed) {
   let a=seed>>>0;
@@ -8,12 +9,10 @@ function makeRandom(seed) {
 }
 export function createShells({ scene, groundHeight, economy }) {
   const rand=makeRandom(2024), spots=[];
-  for(let i=0;i<4000&&spots.length<WANT;i++){
-    const a=rand()*Math.PI*2,r=14+rand()*18,x=Math.cos(a)*r,z=Math.sin(a)*r,g=groundHeight(x,z);
-    if(g<0.1||g>0.38)continue;
-    if(Math.abs(x)<3&&z>8)continue;
-    if(spots.some(s=>Math.hypot(s.x-x,s.z-z)<5))continue;
-    spots.push({x,z,y:g});
+  for(let i=0;i<2400&&spots.length<WANT;i++){
+    const zone=RESOURCE_RULES.shells.zones[i%RESOURCE_RULES.shells.zones.length];
+    const point=sampleZonePoint(zone,rand,groundHeight,{margin:1,minGround:RESOURCE_RULES.shells.height[0],maxGround:RESOURCE_RULES.shells.height[1],avoid:spots.map(s=>({...s,distance:RESOURCE_RULES.shells.separation}))});
+    if(point)spots.push(point);
   }
   const geo=new THREE.SphereGeometry(0.22,10,7);
   const mat=new THREE.MeshStandardMaterial({color:0xFFE3D6,emissive:0xF4A6B8,emissiveIntensity:0.14,roughness:0.78,flatShading:true});

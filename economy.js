@@ -36,6 +36,11 @@ export function createEconomy() {
       if (!ITEMS[item] || count < 1 || usedSlots() + count > data.bagSize) return false;
       data.inventory[item] = (data.inventory[item] || 0) + count; persist(); return true;
     },
+    remove(item, count = 1) {
+      const have=data.inventory[item]||0; if(count<1||have<count)return false;
+      data.inventory[item]-=count;if(!data.inventory[item])delete data.inventory[item];persist();return true;
+    },
+    addCoins(amount) { if(amount>0){data.coins+=amount;persist();return true;}return false; },
     sell(item, count = 1) {
       const def = ITEMS[item], have = data.inventory[item] || 0;
       if (!def || count < 1 || have < count) return false;

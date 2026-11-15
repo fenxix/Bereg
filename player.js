@@ -10,8 +10,10 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
   const RUN_SPEED = 6;
   const PLAYER_R = 0.35; // «толщина» героини для столкновений
 
+  let surfaceAt = groundHeight;
+  let activeColliders = colliders;
   const pos = new THREE.Vector3(start.x, 0, start.z); // где стоит героиня
-  pos.y = groundHeight(pos.x, pos.z);
+  pos.y = surfaceAt(pos.x, pos.z);
   let yaw = 0;        // камера вокруг героини
   let pitch = 0.4;    // наклон камеры
   let distance = 8;   // расстояние до героини
@@ -87,13 +89,13 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
   }, { passive: true });
 
   // В море не заходим: стоять можно, пока поверхность не ниже уровня воды
-  const canStand = (x, z) => groundHeight(x, z) > -0.05;
+  const canStand = (x, z) => surfaceAt(x, z) > -0.05;
 
   // Выталкиваем героиню из домов, деревьев, фонарей, скамеек и фонтана.
   // Если подошла вплотную — она не застревает, а скользит вдоль препятствия.
   function resolveCollisions() {
     for (let pass = 0; pass < 2; pass++) {
-      for (const c of colliders) {
+      for (const c of activeColliders) {
         if (c.kind === 'circle') {
           const dx = pos.x - c.x;
           const dz = pos.z - c.z;
@@ -186,7 +188,7 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
     }
 
     // Высота плавно меняется: при выходе на пирс и на крыльцо нет «рывка»
-    const targetY = groundHeight(pos.x, pos.z);
+    const targetY = surfaceAt(pos.x, pos.z);
     pos.y += (targetY - pos.y) * Math.min(1, dt * 14);
     model.position.copy(pos);
 
@@ -201,7 +203,7 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
     const cx = pos.x + sinY * cosP * distance;
     const cz = pos.z + cosY * cosP * distance;
     const cy = target.y + Math.sin(pitch) * distance;
-    desiredCamera.set(cx, Math.max(cy, groundHeight(cx, cz) + 0.6, 0.6), cz);
+    desiredCamera.set(cx, Math.max(cy, surfaceAt(cx, cz) + 0.6, 0.6), cz);
     // Плавное следование не телепортирует камеру при повороте или движении.
     if (!cameraReady) {
       camera.position.copy(desiredCamera);
@@ -217,5 +219,10 @@ export function createPlayer({ model, camera, domElement, groundHeight, collider
     camera.rotateZ(Math.sin(walkPhase) * 0.004 * moveBlend);
   }
 
-  return { update };
+  function setLocation(x, z, surface = groundHeight, obstacles = colliders) {
+    surfaceAt = surface; activeColliders = obstacles;
+    pos.set(x, surfaceAt(x, z), z); model.position.copy(pos); cameraReady = false;
+  }
+
+  return { update, setLocation, get position() { return pos; } };
 }

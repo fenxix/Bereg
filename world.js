@@ -7,7 +7,7 @@ import {
   createFence, createMailbox, createMushrooms, createRock, createStep,
   createLounger, createUmbrella, createSwingTree,
 } from './models.js';
-import { ZONES, PATHS, zoneById, distToPaths, layoutZones } from './zones.js';
+import { WORLD_SCALE, BASE_ZONES as ZONES, PATHS, zoneById, distToPaths, layoutZones } from './zones.js';
 
 // ===== Настройки (удобно менять здесь) =====
 const COLORS = {
@@ -40,7 +40,7 @@ const CULL_DISTANCE = 45;
 // Туман: над островом обычный, а за его пределами чуть гуще, чтобы край карты не выглядел обрезанным
 const FOG_BASE = 0.008;
 const FOG_SEA = 0.0105;
-const SHADOW_R = 40;       // сколько единиц вокруг героини покрывают тени
+const SHADOW_R = 40 * WORLD_SCALE; // сохраняем прежний охват теней после увеличения мира
 
 // Дома: угол (в градусах, 0 — на восток, 90 — на юг), расстояние от центра, вариант дома.
 // Южное направление (90) свободно: там дорога к пирсу.
@@ -287,27 +287,28 @@ function extraHeight(x, z, d) {
 }
 
 // Высота земли в точке (x, z). Единый источник правды: по ней ходит героиня и на ней стоят все модели.
-export function groundHeight(x, z) {
+function groundHeightBase(x, z) {
   const d = landDistance(x, z);
   const k = 1 - 0.6 * beachMask(x, z);
   const s = smoothstep(SHORE_FROM, SHORE_TO, D_WATER + (d - D_WATER) * k); // плавный пологий берег
   const base = SEABED + s * (PLATEAU - SEABED);
   return base + extraHeight(x, z, d) * (1 - flatness(x, z));
 }
+export function groundHeight(x, z) { return groundHeightBase(x / WORLD_SCALE, z / WORLD_SCALE) * WORLD_SCALE; }
 
 // ===== Пирс: где начинается и куда идёт =====
 // Идёт строго на юг от площади. Начало там, где земля опускается примерно до 0.35.
 const PIER = (() => {
   let z = 10;
-  while (z < 40 && groundHeight(0, z) > 0.35) z += 0.05;
+  while (z < 40 && groundHeightBase(0, z) > 0.35) z += 0.05;
   return { x: 0, z0: z, length: 10.5, halfW: 1.2, deckTop: 0.45 };
 })();
 
 // Высота, по которой ходит героиня: земля или настил пирса
 export function surfaceHeight(x, z) {
-  const g = groundHeight(x, z);
-  const onPier = Math.abs(x - PIER.x) <= PIER.halfW && z >= PIER.z0 && z <= PIER.z0 + PIER.length;
-  return onPier ? Math.max(g, PIER.deckTop) : g;
+  const bx=x/WORLD_SCALE,bz=z/WORLD_SCALE,g=groundHeightBase(bx,bz);
+  const onPier = Math.abs(bx - PIER.x) <= PIER.halfW && bz >= PIER.z0 && bz <= PIER.z0 + PIER.length;
+  return (onPier ? Math.max(g, PIER.deckTop) : g)*WORLD_SCALE;
 }
 
 // Высота волны: нужна и морю, и лодке, чтобы лодка качалась вместе с водой
@@ -465,7 +466,7 @@ function createIsland() {
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    const h = groundHeight(x, z);
+    const h = groundHeightBase(x, z);
     pos.setY(i, h);
 
     if (h < SEA_LEVEL) {
@@ -479,8 +480,8 @@ function createIsland() {
 
       // крутые склоны (скала маяка) становятся каменистыми
       const slope = Math.hypot(
-        groundHeight(x + e, z) - groundHeight(x - e, z),
-        groundHeight(x, z + e) - groundHeight(x, z - e)
+        groundHeightBase(x + e, z) - groundHeightBase(x - e, z),
+        groundHeightBase(x, z + e) - groundHeightBase(x, z - e)
       ) / (2 * e);
       c.lerp(rock, smoothstep(0.4, 0.75, slope) * smoothstep(0.8, 1.6, h) * 0.85);
     }
@@ -733,7 +734,7 @@ function createFireflies(rand) {
       const rad = s.minR + Math.sqrt(rand()) * (s.r - s.minR);
       const x = s.x + Math.cos(ang) * rad;
       const z = s.z + Math.sin(ang) * rad;
-      const g = groundHeight(x, z);
+      const g = groundHeightBase(x, z);
       if (g < 0.5) continue;
       base.push({ x, y: g + 0.5 + rand() * 1.3, z, phase: rand() * Math.PI * 2 });
       placed++;
@@ -826,7 +827,7 @@ function addWaterWall(colliders) {
   const STEP = 1;
   const LIMIT = 62;
   const WALL_R = 0.9;
-  const isLand = (x, z) => groundHeight(x, z) >= WALK_MIN;
+  const isLand = (x, z) => groundHeightBase(x, z) >= WALK_MIN;
   const onPierGap = (x, z) =>
     Math.abs(x - PIER.x) <= PIER.halfW + 0.05 && z >= PIER.z0 - 1.5 && z <= PIER.z0 + PIER.length + 1;
 
@@ -910,7 +911,7 @@ function createTown(scene) {
       const group = zoneFor(item.x, item.z);
       if (!byGroup.has(group)) byGroup.set(group, []);
       byGroup.get(group).push({
-        x: item.x, y: groundHeight(item.x, item.z) + lift + (item.lift || 0), z: item.z,
+        x: item.x, y: groundHeightBase(item.x, item.z) + lift + (item.lift || 0), z: item.z,
         rotY: item.rotY, scale: item.scale, scaleY: item.scaleY,
       });
     }
@@ -942,7 +943,7 @@ function createTown(scene) {
     const rot = Math.atan2(-ux, -uz); // повернуть дверью к центру
 
     const house = houseModel(h.variant);
-    housePlacements[h.variant % 3].push({ x: hx, y: groundHeight(hx, hz) - 0.05, z: hz, rotY: rot });
+    housePlacements[h.variant % 3].push({ x: hx, y: groundHeightBase(hx, hz) - 0.05, z: hz, rotY: rot });
 
     const { w, d } = house.userData.footprint;
     colliders.push({ kind: 'rect', x: hx, z: hz, hw: w / 2 + 0.05, hd: d / 2 + 0.05, rot });
@@ -966,7 +967,7 @@ function createTown(scene) {
 
   // --- Расстановка по зонам: числа считает zones.js (layoutZones), здесь только ставим модели ---
   const layout = layoutZones({
-    groundHeight,
+    groundHeight: groundHeightBase,
     rand,
     pier: PIER,
     // сюда ничего не ставим: площадь и дорога к пирсу
@@ -981,7 +982,7 @@ function createTown(scene) {
   // Дома жилого квартала: те же три модели
   for (const h of layout.houses) {
     houseModel(h.variant);
-    housePlacements[h.variant % 3].push({ x: h.x, y: groundHeight(h.x, h.z) - 0.05, z: h.z, rotY: h.rotY });
+    housePlacements[h.variant % 3].push({ x: h.x, y: groundHeightBase(h.x, h.z) - 0.05, z: h.z, rotY: h.rotY });
   }
 
   // Домик рыбака и маяк: по одному, у них тоже есть окна
@@ -1002,11 +1003,11 @@ function createTown(scene) {
   });
 
   if (hut) {
-    hut.position.set(layout.hut.x, groundHeight(layout.hut.x, layout.hut.z) - 0.02, layout.hut.z);
+    hut.position.set(layout.hut.x, groundHeightBase(layout.hut.x, layout.hut.z) - 0.02, layout.hut.z);
     hut.rotation.y = layout.hut.rotY;
     zoneGroups.get('harbor').add(hut);
   }
-  lighthouse.position.set(layout.lighthouse.x, groundHeight(layout.lighthouse.x, layout.lighthouse.z) - 0.1, layout.lighthouse.z);
+  lighthouse.position.set(layout.lighthouse.x, groundHeightBase(layout.lighthouse.x, layout.lighthouse.z) - 0.1, layout.lighthouse.z);
   lighthouse.rotation.y = layout.lighthouse.rotY;
   zoneGroups.get('lighthouse').add(lighthouse);
 
@@ -1021,7 +1022,7 @@ function createTown(scene) {
 
   const benchPlacements = [];
   const addBench = (x, z, rotY) => {
-    benchPlacements.push({ x, y: groundHeight(x, z), z, rotY });
+    benchPlacements.push({ x, y: groundHeightBase(x, z), z, rotY });
     colliders.push({ kind: 'rect', x, z, hw: 0.85, hd: 0.35, rot: rotY });
   };
   // Четыре скамейки на площади между дорожками, лицом к фонтану
@@ -1036,7 +1037,7 @@ function createTown(scene) {
 
   const lampPlacements = [];
   const addLamp = (x, z) => {
-    lampPlacements.push({ x, y: groundHeight(x, z) - 0.02, z });
+    lampPlacements.push({ x, y: groundHeightBase(x, z) - 0.02, z });
     colliders.push({ kind: 'circle', x, z, r: 0.22 });
   };
   // Фонари вокруг площади между дорожками и два у дороги
@@ -1113,7 +1114,7 @@ function createTown(scene) {
     for (let i = 0; i < count; i++) {
       const f = flowers[Math.floor((i / count) * flowers.length)];
       base.push({
-        x: f.x, z: f.z, y: groundHeight(f.x, f.z) + 0.75 + rand() * 0.6,
+        x: f.x, z: f.z, y: groundHeightBase(f.x, f.z) + 0.75 + rand() * 0.6,
         radius: 0.7 + rand() * 1.1, speed: 0.8 + rand() * 0.9, phase: rand() * Math.PI * 2,
       });
     }
@@ -1141,8 +1142,8 @@ function createTown(scene) {
   // --- Дорожки от площади к каждой зоне ---
   // Плитки не кладём в воду, под скамейки, деревья и дома и поверх уже лежащих плиток
   const slopeAt = (x, z) => Math.hypot(
-    groundHeight(x + 0.5, z) - groundHeight(x - 0.5, z),
-    groundHeight(x, z + 0.5) - groundHeight(x, z - 0.5));
+    groundHeightBase(x + 0.5, z) - groundHeightBase(x - 0.5, z),
+    groundHeightBase(x, z + 0.5) - groundHeightBase(x, z - 0.5));
   const segments = PATHS.map((path) => ({ id: path.id, columns: path.columns, lines: path.points.slice(0, -1).map((pt, i) => [pt, path.points[i + 1]]) }));
   // дорожки от крылец квартала к улице (две плитки в ширину)
   segments.push({ id: 'doors', columns: 2, lines: layout.doorPaths.map((d) => [[d.ax, d.az], [d.bx, d.bz]]) });
@@ -1151,7 +1152,7 @@ function createTown(scene) {
       const segment = [];
       addPath(segment, ax, az, bx, bz, path.columns);
       for (const t of segment) {
-        if (groundHeight(t.x, t.z) < 0.3) continue;
+        if (groundHeightBase(t.x, t.z) < 0.3) continue;
         if (path.id === 'to-lighthouse' && slopeAt(t.x, t.z) >= 0.22) continue; // на крутом месте лежат ступени
         if (colliders.some((c) => insideCollider(c, t.x, t.z, 0.45))) continue;
         if (tiles.some((o) => Math.hypot(o.x - t.x, o.z - t.z) < 0.6)) continue;
@@ -1161,7 +1162,7 @@ function createTown(scene) {
   }
 
   // --- Плитки одним InstancedMesh. Каждая плитка ложится по наклону земли ---
-  const validTiles = tiles.filter((t) => Math.hypot(t.x, t.z) > PLAZA_R - 0.2 && groundHeight(t.x, t.z) > 0.3);
+  const validTiles = tiles.filter((t) => Math.hypot(t.x, t.z) > PLAZA_R - 0.2 && groundHeightBase(t.x, t.z) > 0.3);
   const tileMesh = new THREE.InstancedMesh(
     new THREE.BoxGeometry(0.8, 0.06, 0.8),
     new THREE.MeshStandardMaterial({ color: 0xFFFFFF, flatShading: true, roughness: 1 }),
@@ -1180,14 +1181,14 @@ function createTown(scene) {
   const e = 0.4;
   validTiles.forEach((t, i) => {
     normal.set(
-      groundHeight(t.x - e, t.z) - groundHeight(t.x + e, t.z),
+      groundHeightBase(t.x - e, t.z) - groundHeightBase(t.x + e, t.z),
       2 * e,
-      groundHeight(t.x, t.z - e) - groundHeight(t.x, t.z + e)
+      groundHeightBase(t.x, t.z - e) - groundHeightBase(t.x, t.z + e)
     ).normalize();
     qTilt.setFromUnitVectors(up, normal);
     qYaw.setFromAxisAngle(up, t.rot);
     q.copy(qTilt).multiply(qYaw);
-    p.set(t.x, groundHeight(t.x, t.z) + 0.03, t.z);
+    p.set(t.x, groundHeightBase(t.x, t.z) + 0.03, t.z);
     m.compose(p, q, one);
     tileMesh.setMatrixAt(i, m);
     tileMesh.setColorAt(i, t.shade ? colorA : colorB);
@@ -1200,6 +1201,12 @@ function createTown(scene) {
 
   // --- Невидимая граница вдоль воды (последней, чтобы плитки её не учитывали) ---
   const wallCount = addWaterWall(colliders);
+  const doors = [];
+  const homes = [];
+  for (const h of HOUSES) { const a=THREE.MathUtils.degToRad(h.angle),x=Math.cos(a)*h.radius,z=Math.sin(a)*h.radius,rot=Math.atan2(-Math.cos(a),-Math.sin(a)),model=houseModel(h.variant),front=model.userData.frontDistance+0.35; doors.push({x:x+Math.sin(rot)*front,z:z+Math.cos(rot)*front}); homes.push({x:x+Math.sin(rot)*(front+1.1),z:z+Math.cos(rot)*(front+1.1)}); }
+  for (const h of layout.houses) { doors.push({x:h.doorX,z:h.doorZ}); homes.push({x:h.doorX+Math.sin(h.rotY)*1.1,z:h.doorZ+Math.cos(h.rotY)*1.1}); }
+  for (const list of colliders) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; if(list.r!==undefined)list.r*=WORLD_SCALE; if(list.hw!==undefined)list.hw*=WORLD_SCALE; if(list.hd!==undefined)list.hd*=WORLD_SCALE; }
+  for (const list of [...doors,...homes]) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; }
   console.log(`[Тихий Берег] остров: зон ${ZONES.length}, домов ${HOUSES.length + layout.houses.length}, лавок ${layout.stalls.length}, деревьев ${layout.trees.length}, плиток ${validTiles.length}, препятствий ${colliders.length} (из них границы ${wallCount})`);
 
   // --- Анимация: фонтан и лодка ---
@@ -1230,13 +1237,14 @@ function createTown(scene) {
 
   // --- Дальние зоны не рисуем: смотрим на расстояние от героини до края зоны ---
   function cull(focus) {
+    const fx=focus.x/WORLD_SCALE, fz=focus.z/WORLD_SCALE;
     for (const zone of ZONES) {
-      const dist = Math.hypot(focus.x - zone.x, focus.z - zone.z) - zone.r;
+      const dist = Math.hypot(fx - zone.x, fz - zone.z) - zone.r;
       zoneGroups.get(zone.id).visible = dist < CULL_DISTANCE;
     }
   }
 
-  return { update, setNight, cull, colliders, zoneGroups };
+  return { group: town, update, setNight, cull, colliders, zoneGroups, doors, homes };
 }
 
 // ===== Собираем весь мир =====
@@ -1248,17 +1256,18 @@ export function createWorld(scene) {
 
   const sky = createSky();
   scene.add(sky.group);
-  scene.add(createIsland());
+  const island=createIsland(); island.scale.setScalar(WORLD_SCALE); scene.add(island);
 
   const sea = createSea();
-  scene.add(sea.group);
+  sea.group.scale.setScalar(WORLD_SCALE); scene.add(sea.group);
 
   const lights = createLights(scene);
 
   const town = createTown(scene);
+  town.group.scale.setScalar(WORLD_SCALE);
 
   const fireflies = createFireflies(makeRandom(777));
-  scene.add(fireflies.points);
+  fireflies.points.scale.setScalar(WORLD_SCALE); scene.add(fireflies.points);
 
   const sunDir = new THREE.Vector3();
   const lightRight = new THREE.Vector3();
@@ -1266,6 +1275,7 @@ export function createWorld(scene) {
   const shadowCenter = new THREE.Vector3();
   const worldUp = new THREE.Vector3(0, 1, 0);
   const info = { dayTime: 0, night: 0, glow: 0, sunHeight: 0 };
+  let interiorMode = false;
   const ORIGIN = { x: 0, z: 0 };
 
   // Тени следуют за героиней. Центр сдвигаем «шагами» в одну клетку карты теней,
@@ -1313,7 +1323,7 @@ export function createWorld(scene) {
 
     // Туман и фон. Чем ближе героиня к берегу и дальше от центра, тем гуще туман.
     scene.fog.color.copy(cur.fog);
-    scene.fog.density = FOG_BASE + (FOG_SEA - FOG_BASE) * smoothstep(30, 50, Math.hypot(focus.x, focus.z));
+    scene.fog.density = FOG_BASE + (FOG_SEA - FOG_BASE) * smoothstep(30*WORLD_SCALE, 50*WORLD_SCALE, Math.hypot(focus.x, focus.z));
     scene.background.copy(cur.horizon);
 
     // Небо, звёзды, солнце, луна
@@ -1323,6 +1333,7 @@ export function createWorld(scene) {
     const glow = smoothstep(0.15, 0.8, cur.night);
     town.setNight(glow, time);
     fireflies.update(smoothstep(0.5, 0.9, cur.night), time);
+    fireflies.points.visible = !interiorMode && fireflies.points.visible;
 
     info.dayTime = dayTime;
     info.night = cur.night;
@@ -1333,14 +1344,17 @@ export function createWorld(scene) {
 
   return {
     sky: sky.group,
-    colliders: town.colliders,         // что нельзя проходить насквозь (в том числе берег)
+    colliders: town.colliders,
+    doors: town.doors,
+    homes: town.homes,
+    setInteriorMode: (inside) => { interiorMode=inside; island.visible=!inside; sea.group.visible=!inside; town.group.visible=!inside; fireflies.points.visible=!inside && info.night>0.5; sky.group.visible=!inside; },
     surfaceHeight,                     // высота земли с учётом пирса
     groundHeight,                      // высота голой земли (без пирса): по ней видно, где вода
-    canFish: (x, z) => { const g = groundHeight(x, z); const onPier = Math.abs(x - PIER.x) <= PIER.halfW + 0.7 && z >= PIER.z0 + 0.8 && z <= PIER.z0 + PIER.length; return onPier || (g >= 0.02 && g <= 0.42); },
-    waterHeight: (x, z, t) => waveHeight(x, z, t),
-    start: { x: 0, z: 7.2 },           // где появляется героиня
+    canFish: (x, z) => { const bx=x/WORLD_SCALE,bz=z/WORLD_SCALE,g=groundHeightBase(bx,bz); const onPier = Math.abs(bx - PIER.x) <= PIER.halfW + 0.7 && bz >= PIER.z0 + 0.8 && bz <= PIER.z0 + PIER.length; return onPier || (g >= 0.02 && g <= 0.42); },
+    waterHeight: (x, z, t) => waveHeight(x/WORLD_SCALE, z/WORLD_SCALE, t)*WORLD_SCALE,
+    start: { x: 0, z: 7.2*WORLD_SCALE },           // где появляется героиня
     // focus — где сейчас героиня: вокруг неё следуют тени, по ней считается туман и отсечение дальних зон
-    update: (time, focus = ORIGIN) => {
+    update: (time, focus = {x:0,z:7.2*WORLD_SCALE}) => {
       sea.update(time);
       town.update(time);
       town.cull(focus);

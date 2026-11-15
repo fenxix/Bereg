@@ -1,11 +1,17 @@
-// main.js — сцена, атмосфера, рыбалка и интерфейс (остров из восьми зон: мир сам прячет дальние зоны, ему нужно знать, где героиня)
+// main.js — сцена, атмосфера, рыбалка и интерфейс
 import * as THREE from 'three';
 import { createWorld } from './world.js';
 import { createHeroine } from './models.js';
 import { createPlayer } from './player.js';
 import { createShells } from './shells.js';
 import { createEconomy, ITEMS } from './economy.js';
-import { createMenu } from './menu.js';
+import { createMinimap } from './minimap.js';
+import { createInteriors } from './interiors.js';
+import { createNpcSystem } from './npc.js';
+import { createQuestSystem } from './quests.js';
+import { createIslandLife } from './life.js';
+
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
 const container = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -19,32 +25,6 @@ container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
-
-// Главное меню. Пока оно открыто, игра стоит на паузе (ничего не считаем и не рисуем).
-let playing = false;
-let pausedAt = 0;
-function applySettings(settings) {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.quality === 'low' ? 1 : 1.6));
-  onResize();
-}
-const menu = createMenu({
-  onSettingsChange: applySettings,
-  onPlay() {
-    if (pausedAt) {
-      // время паузы не должно съедать поклёвку: сдвигаем таймеры рыбалки
-      const gap = performance.now() - pausedAt;
-      if (fishing.mode !== 'idle') for (const key of ['started', 'castEnds', 'biteAt', 'biteUntil']) fishing[key] += gap;
-      pausedAt = 0;
-    }
-    frames = 0;
-    lastFps = performance.now();
-    playing = true;
-  },
-  onPause() {
-    playing = false;
-    pausedAt = performance.now();
-  },
-});
 const world = createWorld(scene);
 const heroine = createHeroine();
 scene.add(heroine);
@@ -53,7 +33,15 @@ const player = createPlayer({
   groundHeight: world.surfaceHeight, colliders: world.colliders, start: world.start,
 });
 const economy = createEconomy();
+const quests = createQuestSystem(economy);
+let dialogQuestId = null;
 const shells = createShells({ scene, groundHeight: world.surfaceHeight, economy });
+const minimap = createMinimap({ smallCanvas: document.getElementById('minimap'), largeCanvas: document.getElementById('large-map'), hero: heroine });
+const interiors = createInteriors(scene);
+const npcs = createNpcSystem(scene, world.surfaceHeight, world.colliders, world.homes);
+const islandLife = createIslandLife(scene, world.surfaceHeight);
+let activeInterior = null;
+let outsidePosition = null;
 const actionButton = document.getElementById('action');
 const toastEl = document.getElementById('toast');
 const fishingStatus = document.getElementById('fishing-status');
@@ -61,28 +49,37 @@ const bag = document.getElementById('bag');
 const rodStatus = document.getElementById('rod-status');
 let toastTimer = 0;
 let fishing = { mode: 'idle' };
+const iconMarkup = (name, extra = '') => '<svg class="icon ' + extra + '" aria-hidden="true"><use href="#i-' + name + '"></use></svg>';
+const setStatus = (text, icon = 'wave') => { fishingStatus.innerHTML = iconMarkup(icon) + ' ' + text; };
 let fishingRod = null;
 let fishingLine = null;
 let bobber = null;
 let splash = null;
 let caughtFish = null;
 
-function toast(message) {
-  toastEl.textContent = message;
+function toast(message, icon = null) {
+  toastEl.innerHTML = icon ? iconMarkup(icon) + ' ' + message : '';
+  if (!icon) toastEl.textContent = message;
   toastEl.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2400);
 }
 
 function refreshBag() {
-  document.getElementById('coins').textContent = '🪙 ' + economy.coins;
-  document.getElementById('pearls').textContent = '🐚 ' + economy.pearls;
+  document.getElementById('coins').innerHTML = iconMarkup('coin') + ' ' + economy.coins;
+  document.getElementById('pearls').innerHTML = iconMarkup('pearl') + ' ' + economy.pearls;
   document.getElementById('bag-count').textContent = economy.usedSlots + '/' + economy.bagSize;
   document.getElementById('rod-label').textContent = 'Удочка: ' + economy.rodLabel;
-  rodStatus.textContent = economy.hasRod ? '🎣 ' + economy.rodLabel + ' удочка' : 'Удочки нет';
+  rodStatus.innerHTML = economy.hasRod ? iconMarkup('fishing') + ' ' + economy.rodLabel + ' удочка' : 'Удочки нет';
   const list = document.getElementById('inventory-list');
   list.replaceChildren();
   const entries = economy.summary();
+  document.querySelectorAll('.quick-slot[data-slot]').forEach((slot) => {
+    const item = entries[Number(slot.dataset.slot)];
+    slot.innerHTML = item ? iconMarkup(item.id.includes('Fish') ? 'fish' : item.id.toLowerCase().includes('shell') ? 'shell' : 'star') + '<small>' + item.count + '</small>' : '<span class="slot-number">' + (Number(slot.dataset.slot)+1) + '</span>';
+    slot.classList.toggle('filled', Boolean(item));
+    slot.title = item ? item.label + ' × ' + item.count : 'Пустой слот';
+  });
   if (!entries.length) {
     const empty = document.createElement('p');
     empty.className = 'empty';
@@ -97,13 +94,22 @@ function refreshBag() {
     const sell = document.createElement('button');
     sell.type = 'button';
     sell.dataset.sell = row.id;
-    sell.textContent = 'Продать (' + row.price + (row.currency === 'pearls' ? ' 🐚' : ' 🪙') + ')';
+    sell.innerHTML = 'Продать (' + row.price + ' ' + iconMarkup(row.currency === 'pearls' ? 'pearl' : 'coin') + ')';
     line.append(label, sell);
     list.append(line);
   }
 }
 
+document.querySelectorAll('.quick-slot[data-slot]').forEach((slot) => slot.addEventListener('click', () => { const item = economy.summary()[Number(slot.dataset.slot)]; if (item) toast(item.label + ' × ' + item.count); }));
 document.getElementById('bag-toggle').addEventListener('click', () => { bag.hidden = !bag.hidden; refreshBag(); });
+document.getElementById('dialog-close').addEventListener('click',()=>{document.getElementById('npc-dialog').hidden=true;});
+document.getElementById('dialog-goodbye').addEventListener('click',()=>{document.getElementById('npc-dialog').hidden=true;});
+document.getElementById('quest-accept').addEventListener('click',()=>{if(!dialogQuestId)return;const result=quests.accept(dialogQuestId);toast(result.message);document.getElementById('npc-dialog').hidden=true;refreshQuestJournal();});
+document.getElementById('quest-open').addEventListener('click',()=>{refreshQuestJournal();document.getElementById('quests-panel').hidden=false;});
+document.getElementById('quest-close').addEventListener('click',()=>{document.getElementById('quests-panel').hidden=true;});
+document.getElementById('quest-content').addEventListener('click',(event)=>{if(event.target.id==='quest-finish'){const result=quests.finish();toast(result.message);refreshBag();refreshQuestJournal();}});
+function openNpcDialog(person){const data=npcs.talk(person.id,world.getDayInfo().dayTime);if(!data)return;dialogQuestId=data.questId;document.getElementById('dialog-name').textContent=data.name;document.getElementById('dialog-text').textContent=data.text;document.getElementById('dialog-affection').textContent='Симпатия: '+data.affection+' из 5';const accept=document.getElementById('quest-accept');const done=data.questId&&quests.isDone(data.questId);accept.disabled=!data.questId||Boolean(quests.active)||done;accept.textContent=!data.questId?'Пока нет задания':done?'Уже выполнено':quests.active?'Сначала закончи текущее':'Взять задание';document.getElementById('npc-dialog').hidden=false;}
+function refreshQuestJournal(){const box=document.getElementById('quest-content');const q=quests.progress();box.replaceChildren();if(!q){const p=document.createElement('p');p.textContent='Активных заданий нет. Поговори с жителями, чтобы узнать, кому нужна помощь.';box.append(p);return;}const title=document.createElement('h3');title.textContent=q.title;const detail=document.createElement('p');detail.textContent='Собери: '+( ({shell:'обычные ракушки',pinkShell:'розовую ракушку',smallFish:'мелкую рыбу',mediumFish:'среднюю рыбу',flower:'цветы'}[q.item]||q.item)+' — '+q.amount+'. Сейчас в сумке: '+Math.min(q.have,q.amount)+'/'+q.amount);const reward=document.createElement('p');reward.textContent='Награда: '+q.reward+' монет';const finish=document.createElement('button');finish.id='quest-finish';finish.type='button';finish.textContent='Передать предметы и получить награду';finish.disabled=q.have<q.amount;box.append(title,detail,reward,finish);}
 document.getElementById('bag-close').addEventListener('click', () => { bag.hidden = true; });
 document.getElementById('inventory-list').addEventListener('click', (event) => {
   const id = event.target.dataset.sell;
@@ -147,25 +153,12 @@ function makeFishingRod() {
   return group;
 }
 
-// Куда летит поплавок. Сначала смотрим от центра острова, а если там берег (на острове есть бухты и гавань),
-// поворачиваем по 15° в обе стороны, пока впереди не найдётся вода.
-const CAST_DISTANCE = 4.2;
 function castPoint() {
   const p = heroine.position;
-  const away = Math.atan2(p.z, p.x);
-  const step = Math.PI / 12;
-  for (let i = 0; i <= 12; i++) {
-    for (const sign of i === 0 ? [1] : [1, -1]) {
-      const a = away + sign * i * step;
-      const dx = Math.cos(a);
-      const dz = Math.sin(a);
-      const nearWater = world.groundHeight(p.x + dx * CAST_DISTANCE * 0.7, p.z + dz * CAST_DISTANCE * 0.7) < 0;
-      const farWater = world.groundHeight(p.x + dx * CAST_DISTANCE, p.z + dz * CAST_DISTANCE) < -0.3;
-      if (nearWater && farWater) return { x: p.x + dx * CAST_DISTANCE, z: p.z + dz * CAST_DISTANCE };
-    }
-  }
   const length = Math.max(0.001, Math.hypot(p.x, p.z));
-  return { x: p.x + (p.x / length) * CAST_DISTANCE, z: p.z + (p.z / length) * CAST_DISTANCE };
+  const dx = p.x / length;
+  const dz = p.z / length;
+  return { x: p.x + dx * 4.2, z: p.z + dz * 4.2 };
 }
 
 function startFishing(now) {
@@ -197,7 +190,7 @@ function startFishing(now) {
     target,
   };
   fishingStatus.hidden = false;
-  fishingStatus.textContent = '🎣 Забрасываем удочку…';
+  setStatus('Забрасываем удочку…', 'fishing');
 }
 
 function disposeFishing() {
@@ -241,7 +234,7 @@ function landFish(item) {
   disposeFishing();
   if (item) {
     caughtFish = makeCaughtFish(start);
-    toast('Поймана рыба: ' + label + '!');
+    toast('Поймана рыба: ' + label + '!', 'fish');
   } else {
     toast('Сумка полна — рыба уплыла.');
   }
@@ -250,8 +243,37 @@ function landFish(item) {
   fishing = { mode: 'idle' };
 }
 
-function performAction() {
-  if (!playing) return;
+function fadeTransition(change) {
+  const layer=document.getElementById('fade');layer.classList.add('active');
+  return new Promise((resolve)=>setTimeout(()=>{change();setTimeout(()=>{layer.classList.remove('active');resolve();},180);},180));
+}
+
+async function performAction() {
+  if (activeInterior) {
+    if (Math.hypot(heroine.position.x-activeInterior.x, heroine.position.z-2.25)>1.45) { toast('Подойди к двери, чтобы выйти.'); return; }
+    await fadeTransition(() => {
+      interiors.hide(); world.setInteriorMode(false);
+      player.setLocation(outsidePosition.x, outsidePosition.z, world.surfaceHeight, world.colliders);
+      activeInterior = null; outsidePosition = null;
+      document.getElementById('minimap-panel').hidden = false;
+      actionButton.textContent = 'Действие';
+    });
+    return;
+  }
+  const nearbyPerson = npcs.nearby(heroine.position);
+  if (nearbyPerson) { openNpcDialog(nearbyPerson); return; }
+  const nearbyDoor = world.doors.find((door) => Math.hypot(heroine.position.x-door.x, heroine.position.z-door.z) < 2.1);
+  if (nearbyDoor) {
+    const room = interiors.show(nearbyDoor.interior);
+    outsidePosition = {x: heroine.position.x, z: heroine.position.z};
+    await fadeTransition(() => {
+      world.setInteriorMode(true); document.getElementById('minimap-panel').hidden = true;
+      const obstacles = interiors.colliders.map((c) => ({...c, x:c.x+room.x}));
+      player.setLocation(room.x, 1.8, (x,z)=>interiors.surface(x-room.x,z), obstacles);
+      activeInterior = room;
+    });
+    return;
+  }
   // Активный клёв важнее ракушек рядом: кнопка «Подсечь» всегда делает именно подсечку.
   if (fishing.mode === 'bite') {
     if (performance.now() <= fishing.biteUntil) {
@@ -268,7 +290,7 @@ function performAction() {
   if (nearShell) {
     const result = shells.collect();
     if (result?.error) toast(result.error);
-    else if (result?.item) toast('Найдена: ' + ITEMS[result.item].label);
+    else if (result?.item) toast('Найдена: ' + ITEMS[result.item].label, result.item === 'starShell' ? 'star' : 'shell');
     refreshBag();
     return;
   }
@@ -298,21 +320,21 @@ function updateFishing(now, dt) {
     bobber.position.y += Math.sin(progress * Math.PI) * 1.9;
     if (progress >= 1) {
       fishing.mode = 'waiting';
-      fishingStatus.textContent = '🌊 Поплавок на волнах — ждём поклёвку';
+      setStatus('Поплавок на волнах — ждём поклёвку');
     } else {
-      fishingStatus.textContent = '🎣 Заброс…';
+      setStatus('Заброс…', 'fishing');
     }
   } else {
     const waterY = world.waterHeight(fishing.target.x, fishing.target.z, now / 1000);
     if (fishing.mode === 'waiting') {
       bobber.position.y = waterY + 0.13 + Math.sin(now * 0.003) * 0.045;
       const seconds = Math.max(0, Math.ceil((fishing.biteAt - now) / 1000));
-      fishingStatus.textContent = '🌊 Ждём поклёвку · ' + seconds + ' сек.';
+      setStatus('Ждём поклёвку · ' + seconds + ' сек.');
       if (now >= fishing.biteAt) {
         fishing.mode = 'bite';
         fishing.biteUntil = now + 2100;
         makeSplash(fishing.target.x, waterY, fishing.target.z);
-        fishingStatus.textContent = '✨ Клюёт! Быстро нажми «Подсечь!»';
+        setStatus('Клюёт! Быстро нажми «Подсечь!»', 'star');
         toast('Поплавок дёрнулся — подсекай!');
       }
     } else if (fishing.mode === 'bite') {
@@ -323,7 +345,7 @@ function updateFishing(now, dt) {
         splash.scale.setScalar(0.7 + age * 2.6);
         splash.material.opacity = Math.max(0, 0.62 * (1 - age));
       }
-      fishingStatus.textContent = '✨ Клюёт! Нажми «Подсечь!» · ' + (Math.max(0, fishing.biteUntil - now) / 1000).toFixed(1) + ' сек.';
+      setStatus('Клюёт! Нажми «Подсечь!» · ' + (Math.max(0, fishing.biteUntil - now) / 1000).toFixed(1) + ' сек.', 'star');
       if (now > fishing.biteUntil) {
         landFish(null);
         toast('Рыбка сорвалась с крючка.');
@@ -348,13 +370,13 @@ function updateFishing(now, dt) {
 }
 
 function dayLabel(dayTime) {
-  if (dayTime < 0.18 || dayTime >= 0.88) return { label: 'Ночь', icon: '🌙' };
-  if (dayTime < 0.29) return { label: 'Рассвет', icon: '🌅' };
-  if (dayTime < 0.46) return { label: 'Утро', icon: '☀️' };
-  if (dayTime < 0.64) return { label: 'День', icon: '🌤️' };
-  if (dayTime < 0.72) return { label: 'После полудня', icon: '🌤️' };
-  if (dayTime < 0.81) return { label: 'Закат', icon: '🌇' };
-  return { label: 'Сумерки', icon: '🌆' };
+  if (dayTime < 0.18 || dayTime >= 0.88) return { label: 'Ночь', icon: 'moon' };
+  if (dayTime < 0.29) return { label: 'Рассвет', icon: 'sunrise' };
+  if (dayTime < 0.46) return { label: 'Утро', icon: 'sun' };
+  if (dayTime < 0.64) return { label: 'День', icon: 'cloudsun' };
+  if (dayTime < 0.72) return { label: 'После полудня', icon: 'cloudsun' };
+  if (dayTime < 0.81) return { label: 'Закат', icon: 'sunset' };
+  return { label: 'Сумерки', icon: 'moon' };
 }
 
 function updateClock() {
@@ -365,7 +387,7 @@ function updateClock() {
   const phase = dayLabel(info.dayTime);
   document.getElementById('clock-time').textContent = hh + ':' + mm;
   document.getElementById('day-phase').textContent = phase.label;
-  document.getElementById('time-icon').textContent = phase.icon;
+  document.getElementById('time-icon').innerHTML = iconMarkup(phase.icon, 'icon-time');
 }
 
 function onResize() {
@@ -382,20 +404,27 @@ function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min((now - previous) / 1000, 0.05);
   previous = now;
-  if (!playing) return;
 
   player.update(dt);
   const position = heroine.position;
   const nearbyShell = shells.update(dt, position);
-  world.update(now / 1000, position);   // position нужен миру: тени, туман и скрытие дальних зон считаются вокруг героини
+  world.update(now / 1000, position);
+  npcs.update(dt, position, world.getDayInfo().dayTime);
+  islandLife.update(dt, now / 1000);
+  minimap.update(position);
   updateFishing(now, dt);
 
-  if (fishing.mode === 'idle') {
+  if (activeInterior) { const nearExit=Math.hypot(position.x-activeInterior.x,position.z-2.25)<1.45; actionButton.hidden=!nearExit; actionButton.disabled=false; actionButton.textContent='Выйти из дома'; }
+  else if (fishing.mode === 'idle') {
     actionButton.classList.remove('bite');
     actionButton.disabled = false;
-    if (nearbyShell) {
+    const nearbyPerson=npcs.nearby(position);
+    if (nearbyPerson) { actionButton.hidden=false; actionButton.textContent='Поговорить: '+nearbyPerson.name; }
+    else if (nearbyShell) {
       actionButton.hidden = false;
       actionButton.textContent = 'Взять ракушку';
+    } else if (world.doors.some((door) => Math.hypot(position.x-door.x, position.z-door.z) < 2.1)) {
+      actionButton.hidden=false; actionButton.textContent='Войти в дом';
     } else if (fishingNearby()) {
       actionButton.hidden = false;
       actionButton.textContent = economy.hasRod ? 'Закинуть удочку' : 'Нужна удочка';
@@ -425,12 +454,10 @@ function loop(now) {
 
   frames++;
   if (now - lastFps >= 500) {
-    // вызовы отрисовки (включая тени): если FPS на телефоне низкий, это число подскажет, где тяжело
-    document.getElementById('fps').textContent = 'FPS: ' + Math.round(frames * 1000 / (now - lastFps)) + ' · ' + renderer.info.render.calls + ' выз.';
+    document.getElementById('fps').textContent = 'FPS: ' + Math.round(frames * 1000 / (now - lastFps));
     frames = 0;
     lastFps = now;
   }
 }
 refreshBag();
-menu.setReady();
 requestAnimationFrame(loop);
