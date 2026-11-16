@@ -7,7 +7,8 @@ import {
   createFence, createMailbox, createMushrooms, createRock, createStep,
   createLounger, createUmbrella, createSwingTree,
 } from './models.js';
-import { WORLD_SCALE, BASE_ZONES as ZONES, PATHS, zoneById, distToPaths, layoutZones } from './zones.js';
+import { createBush, createGrassTuft } from './scenery.js';
+import { WORLD_SCALE, BASE_ZONES as ZONES, PATHS, zoneById, distToPaths, layoutZones, pathTilePlan } from './zones.js';
 
 // ===== Настройки (удобно менять здесь) =====
 const COLORS = {
@@ -1012,7 +1013,7 @@ function createTown(scene) {
   zoneGroups.get('lighthouse').add(lighthouse);
 
   // --- Дорога от площади к пирсу ---
-  addPath(tiles, 0, PLAZA_R + 0.1, 0, PIER.z0 - 0.2, 3);
+  // (дорога от площади к пирсу теперь целиком идёт по тропе to-harbor, отдельная не нужна)
 
   // --- Скамейки и фонари (по одной модели, много мест) ---
   const toCenter = (angleDeg) => {
@@ -1100,6 +1101,9 @@ function createTown(scene) {
   addInstances(createMailbox(), layout.mailboxes, { shadow: false });
   addInstances(createMushrooms(), layout.mushrooms, { shadow: false });
   addInstances(createRock(), layout.rocks, { shadow: false });
+  // Кусты (два вида) и пучки травы: заполняют пустые места по всему острову
+  for (const variant of [0, 1]) addInstances(createBush(variant), layout.bushes.filter((b) => b.variant === variant), { lift: -0.03 });
+  addInstances(createGrassTuft(), layout.tufts, { lift: -0.03, shadow: false });
   addInstances(createLounger(), layout.loungers, { shadow: false });
   addInstances(createUmbrella(), layout.umbrellas);
   addInstances(createBench(), layout.benches, { lift: -0.02, shadow: false });
@@ -1144,21 +1148,20 @@ function createTown(scene) {
   const slopeAt = (x, z) => Math.hypot(
     groundHeightBase(x + 0.5, z) - groundHeightBase(x - 0.5, z),
     groundHeightBase(x, z + 0.5) - groundHeightBase(x, z - 0.5));
-  const segments = PATHS.map((path) => ({ id: path.id, columns: path.columns, lines: path.points.slice(0, -1).map((pt, i) => [pt, path.points[i + 1]]) }));
+  const pushTile = (t, pathId) => {
+    if (groundHeightBase(t.x, t.z) < 0.3) return;
+    if (pathId === 'to-lighthouse' && slopeAt(t.x, t.z) >= 0.22) return; // на крутом месте лежат ступени
+    if (colliders.some((c) => insideCollider(c, t.x, t.z, 0.45))) return;
+    if (tiles.some((o) => Math.hypot(o.x - t.x, o.z - t.z) < 0.6)) return;
+    tiles.push(t);
+  };
+  // главные тропы: плитки лежат вдоль плавной кривой (см. pathTilePlan в zones.js)
+  for (const path of PATHS) for (const t of pathTilePlan(path)) pushTile(t, path.id);
   // дорожки от крылец квартала к улице (две плитки в ширину)
-  segments.push({ id: 'doors', columns: 2, lines: layout.doorPaths.map((d) => [[d.ax, d.az], [d.bx, d.bz]]) });
-  for (const path of segments) {
-    for (const [[ax, az], [bx, bz]] of path.lines) {
-      const segment = [];
-      addPath(segment, ax, az, bx, bz, path.columns);
-      for (const t of segment) {
-        if (groundHeightBase(t.x, t.z) < 0.3) continue;
-        if (path.id === 'to-lighthouse' && slopeAt(t.x, t.z) >= 0.22) continue; // на крутом месте лежат ступени
-        if (colliders.some((c) => insideCollider(c, t.x, t.z, 0.45))) continue;
-        if (tiles.some((o) => Math.hypot(o.x - t.x, o.z - t.z) < 0.6)) continue;
-        tiles.push(t);
-      }
-    }
+  for (const d of layout.doorPaths) {
+    const segment = [];
+    addPath(segment, d.ax, d.az, d.bx, d.bz, 2);
+    for (const t of segment) pushTile(t, 'doors');
   }
 
   // --- Плитки одним InstancedMesh. Каждая плитка ложится по наклону земли ---
@@ -1185,6 +1188,7 @@ function createTown(scene) {
       2 * e,
       groundHeightBase(t.x, t.z - e) - groundHeightBase(t.x, t.z + e)
     ).normalize();
+    normal.lerp(up, 0.35).normalize();   // плитки наклоняются по склону чуть мягче: меньше торчащих углов
     qTilt.setFromUnitVectors(up, normal);
     qYaw.setFromAxisAngle(up, t.rot);
     q.copy(qTilt).multiply(qYaw);
@@ -1207,7 +1211,7 @@ function createTown(scene) {
   for (const h of layout.houses) { doors.push({x:h.doorX,z:h.doorZ}); homes.push({x:h.doorX+Math.sin(h.rotY)*1.1,z:h.doorZ+Math.cos(h.rotY)*1.1}); }
   for (const list of colliders) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; if(list.r!==undefined)list.r*=WORLD_SCALE; if(list.hw!==undefined)list.hw*=WORLD_SCALE; if(list.hd!==undefined)list.hd*=WORLD_SCALE; }
   for (const list of [...doors,...homes]) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; }
-  console.log(`[Тихий Берег] остров: зон ${ZONES.length}, домов ${HOUSES.length + layout.houses.length}, лавок ${layout.stalls.length}, деревьев ${layout.trees.length}, плиток ${validTiles.length}, препятствий ${colliders.length} (из них границы ${wallCount})`);
+  console.log(`[Тихий Берег] остров: зон ${ZONES.length}, домов ${HOUSES.length + layout.houses.length}, лавок ${layout.stalls.length}, деревьев ${layout.trees.length}, кустов ${layout.bushes.length}, травы ${layout.tufts.length}, плиток ${validTiles.length}, препятствий ${colliders.length} (из них границы ${wallCount})`);
 
   // --- Анимация: фонтан и лодка ---
   function update(t) {

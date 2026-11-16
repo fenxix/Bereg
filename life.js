@@ -1,7 +1,7 @@
 // Уличные маршруты и распределённые по острову насекомые.
 import * as THREE from 'three';
 import { createHeroine, animateCharacter } from './models.js';
-import { RESOURCE_RULES, ROAD_NETWORK, sampleZonePoint } from './zones.js';
+import { RESOURCE_RULES, ROAD_NETWORK, spreadLandPoints } from './zones.js';
 
 function makeRandom(seed){let value=seed>>>0;return()=>{value=(value+0x6D2B79F5)|0;let t=Math.imul(value^(value>>>15),1|value);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
 function routeLoop(points){return [...points,...points.slice(0,-1).reverse()];}
@@ -38,20 +38,19 @@ export function createIslandLife(scene,groundHeight){
     const body=new THREE.Mesh(new THREE.CapsuleGeometry(kind==='bee'?.045:.02,kind==='dragonfly'?.19:.11,2,5),new THREE.MeshStandardMaterial({color:kind==='bee'?0x604D37:0x584940}));body.rotation.z=Math.PI/2;root.add(body);
     const wingGeo=new THREE.SphereGeometry(1,7,5),wingScale=kind==='dragonfly'?.15:.11;
     for(const side of [-1,1]){const wing=new THREE.Mesh(wingGeo,mat);wing.scale.set(wingScale,.016,kind==='dragonfly'?.045:.08);wing.position.set(0,.04,side*.07);wing.name='wing'+side;root.add(wing);}
-    scene.add(root);insects.push({kind,root,x:point.x,z:point.z,baseY:point.y,phase:index*2.31+random()*6,range:kind==='dragonfly'?1.8:.8});
+    scene.add(root);insects.push({kind,root,x:point.x,z:point.z,baseY:point.y,phase:index*2.31+random()*6,range:kind==='dragonfly'?1.8:kind==='butterfly'?1.6:1});
   }
   let insectId=0;
-  for(const [kind,zoneIds] of [['butterfly',RESOURCE_RULES.butterflies.zones],['bee',RESOURCE_RULES.bees.zones],['dragonfly',RESOURCE_RULES.dragonflies.zones]]){
-    const rule=RESOURCE_RULES[kind==='butterfly'?'butterflies':kind==='bee'?'bees':'dragonflies'];let count=0,tries=0;
-    while(count<rule.count&&tries<rule.count*100){tries++;const zoneId=zoneIds[tries%zoneIds.length],point=sampleZonePoint(zoneId,random,groundHeight,{margin:1,minGround:.4,maxGround:3});if(!point)continue;const tooClose=insects.some(item=>item.kind===kind&&Math.hypot(item.x-point.x,item.z-point.z)<rule.separation);if(tooClose)continue;addFlyingInsect(kind,point,insectId++);count++;}
+  // Бабочки, пчёлы, стрекозы: равномерно по всему острову (правила в RESOURCE_RULES, zones.js)
+  for(const [kind,ruleKey] of [['butterfly','butterflies'],['bee','bees'],['dragonfly','dragonflies']]){
+    spreadLandPoints(RESOURCE_RULES[ruleKey].count,random,groundHeight,RESOURCE_RULES[ruleKey]).forEach(point=>addFlyingInsect(kind,point,insectId++));
   }
 
-  const beetleRule=RESOURCE_RULES.beetles,beetlePoints=[];let tries=0;
-  while(beetlePoints.length<beetleRule.count&&tries<beetleRule.count*100){tries++;const zoneId=beetleRule.zones[tries%beetleRule.zones.length],point=sampleZonePoint(zoneId,random,groundHeight,{margin:1,minGround:.4,maxGround:3});if(!point||beetlePoints.some(p=>Math.hypot(p.x-point.x,p.z-point.z)<beetleRule.separation))continue;beetlePoints.push({...point,phase:random()*6});}
+  const beetleRule=RESOURCE_RULES.beetles,beetlePoints=spreadLandPoints(beetleRule.count,random,groundHeight,beetleRule).map(point=>({...point,phase:random()*6}));
   const beetles=new THREE.InstancedMesh(new THREE.SphereGeometry(.075,7,5),new THREE.MeshStandardMaterial({color:0x476B45,roughness:.9}),beetlePoints.length),dummy=new THREE.Object3D();scene.add(beetles);
 
-  const caterpillarRule=RESOURCE_RULES.caterpillars,caterpillars=[];tries=0;
-  while(caterpillars.length<caterpillarRule.count&&tries<caterpillarRule.count*120){tries++;const zoneId=caterpillarRule.zones[tries%caterpillarRule.zones.length],point=sampleZonePoint(zoneId,random,groundHeight,{margin:1,minGround:.4,maxGround:3});if(!point||caterpillars.some(c=>Math.hypot(c.x-point.x,c.z-point.z)<caterpillarRule.separation))continue;
+  const caterpillarRule=RESOURCE_RULES.caterpillars,caterpillars=[];
+  for(const point of spreadLandPoints(caterpillarRule.count,random,groundHeight,caterpillarRule)){
     const group=new THREE.Group();for(let j=0;j<5;j++){const s=new THREE.Mesh(new THREE.SphereGeometry(j===4?.045:.055,6,5),new THREE.MeshStandardMaterial({color:j===4?0x4D7644:0x80A64A,roughness:1}));s.position.set((j-2)*.075,.04+Math.sin(j*.8)*.018,0);group.add(s);}group.position.set(point.x,groundHeight(point.x,point.z)+.025,point.z);scene.add(group);caterpillars.push({group,x:point.x,z:point.z,phase:random()*6});
   }
 
