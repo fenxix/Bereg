@@ -64,6 +64,6 @@ export function createNpcSystem(scene,groundHeight,colliders=[],homes=[]){
    }
  }
  function nearby(pos){let best=null;for(const p of people){if(p.hidden)continue;const d=Math.hypot(pos.x-p.model.position.x,pos.z-p.model.position.z);if(d<2.5&&(!best||d<best.distance))best={...p,distance:d};}return best;}
- function talk(id,dayTime){const p=people.find(x=>x.id===id);if(!p)return null;const day=Math.floor(Date.now()/720000);if(p.lastTalk!==day){p.affection=Math.min(5,p.affection+1);p.lastTalk=day;localStorage.setItem(SAVE,JSON.stringify(Object.fromEntries(people.map(x=>[x.id,{affection:x.affection,lastTalk:x.lastTalk}]))));}const item={mira:'shells',timofey:'fish',anna:'flowers',lea:'pinkshell',noah:'fish',rosa:'flowers',kai:'shells',uma:'fish',felix:'fish',sam:'shell'}[p.id];return {id:p.id,name:p.name+' — '+p.job,text:p.line,affection:p.affection,questId:item?p.id+'-'+item:null};}
+ function talk(id,dayTime){const p=people.find(x=>x.id===id);if(!p)return null;const day=Math.floor(Date.now()/720000);const gained=p.lastTalk!==day;if(gained){p.affection=Math.min(5,p.affection+1);p.lastTalk=day;localStorage.setItem(SAVE,JSON.stringify(Object.fromEntries(people.map(x=>[x.id,{affection:x.affection,lastTalk:x.lastTalk}]))));}return {id:p.id,name:p.name+' — '+p.job,text:p.line,affection:p.affection,gained};}
  return {update,nearby,talk};
 }

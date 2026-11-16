@@ -172,3 +172,25 @@ body {
 @media(max-width:620px){.map-zoom{margin-bottom:5px}.map-zoom button{width:32px;height:32px}.map-content{grid-template-columns:minmax(0,1fr) 105px}}
 
 #quest-open{position:fixed;left:12px;top:52px;z-index:5;border:1px solid #fff9;border-radius:999px;padding:7px 14px;background:rgba(255,248,236,.72);color:#5b3a2e;font:600 13px system-ui;cursor:pointer;backdrop-filter:blur(8px)}#quests-panel[hidden]{display:none}#quests-panel{position:fixed;z-index:8;left:12px;top:88px;width:min(340px,calc(100vw - 24px));max-height:65vh;overflow:auto;padding:15px;border:1px solid #fff9;border-radius:17px;background:rgba(255,248,236,.94);color:#5b3a2e;box-shadow:0 8px 30px #4d35282a}#quest-content h3{font-size:17px;margin:10px 0}#quest-content p{font-size:14px;line-height:1.45;margin:8px 0}#quest-finish{border:0;border-radius:10px;padding:9px 12px;background:#f4a6b8;color:#5b3a2e;font:600 13px system-ui}#quest-finish:disabled{opacity:.5}#quest-accept:disabled{opacity:.5;cursor:default}@media(max-width:620px){#quest-open{top:48px;left:8px;padding:6px 10px;font-size:11px}}
+
+
+/* ===== Этап 1: уровень, главная цель, журнал ===== */
+#level-card{position:fixed;z-index:5;left:96px;top:46px;width:172px;padding:5px 9px 6px;border:1px solid #fff9;border-radius:14px;background:rgba(255,248,236,.8);color:#5b3a2e;box-shadow:0 4px 14px #5a3c2b14;backdrop-filter:blur(8px);cursor:pointer;pointer-events:auto}
+#level-card .lvl-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:11px}
+#level-card strong{font-size:13px}
+#level-card .lvl-row span{opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xp-bar{height:6px;margin:4px 0 3px;border-radius:99px;background:#5b3a2e1f;overflow:hidden}
+.xp-bar i{display:block;height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,#F4A6B8,#E8836B);transition:width .4s}
+#goal-line{display:block;font-size:10.5px;line-height:1.25;opacity:.85}
+#npc-dialog #dialog-text{white-space:pre-line}
+#quest-content .lvl-line{font-size:12px;line-height:1.4;opacity:.85;margin:0 0 10px}
+#quest-content .goal-box,#quest-content .q-card{margin:0 0 10px;padding:11px 12px;border-radius:13px;background:#fff;border:1px solid #5b3a2e14}
+#quest-content h3{font-size:15px;margin:0 0 4px}
+#quest-content .q-head{margin:14px 0 6px}
+#quest-content p{font-size:13px;line-height:1.4;margin:3px 0}
+.goal-step{display:flex;justify-content:space-between;gap:8px;font-size:13px;margin-top:7px}
+.goal-step.done{color:#5E8A4B}
+.mini-bar{height:5px;margin-top:3px;border-radius:99px;background:#5b3a2e1a;overflow:hidden}
+.mini-bar i{display:block;height:100%;background:#A8D08D}
+.q-card button{margin-top:8px;width:100%;padding:8px;border:0;border-radius:10px;background:#F4A6B8;color:#5b3a2e;font:600 13px system-ui;cursor:pointer}
+.q-card button:disabled{opacity:.45;cursor:default}

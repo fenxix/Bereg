@@ -8,8 +8,10 @@ import { createEconomy, ITEMS } from './economy.js';
 import { createMinimap } from './minimap.js';
 import { createInteriors } from './interiors.js';
 import { createNpcSystem } from './npc.js';
-import { createQuestSystem } from './quests.js';
+import { createQuestSystem, MAX_ACTIVE } from './quests.js';
 import { createIslandLife } from './life.js';
+import { createGoals, XP, ROD_LEVEL, bagLevel } from './goals.js';
+import { createFlowers } from './flowers.js';
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
@@ -33,9 +35,24 @@ const player = createPlayer({
   groundHeight: world.surfaceHeight, colliders: world.colliders, start: world.start,
 });
 const economy = createEconomy();
-const quests = createQuestSystem(economy);
+// Очередь сообщений: уровень, глава и награда показываются по очереди, а не друг поверх друга
+const announceQueue = [];
+let announceBusy = false;
+function announce(message, icon = null, first = false) {
+  if (first) announceQueue.unshift([message, icon]); else announceQueue.push([message, icon]);
+  if (!announceBusy) { announceBusy = true; setTimeout(nextAnnounce, 0); }
+}
+function nextAnnounce() {
+  const next = announceQueue.shift();
+  if (!next) { announceBusy = false; return; }
+  toast(next[0], next[1]);
+  setTimeout(nextAnnounce, 2600);
+}
+const goals = createGoals({ economy, notify: announce, onChange: () => { refreshWallet(); refreshGoals(); } });
+const quests = createQuestSystem({ economy, goals, notify: announce });
 let dialogQuestId = null;
 const shells = createShells({ scene, groundHeight: world.surfaceHeight, economy });
+const flowers = createFlowers({ scene, groundHeight: world.surfaceHeight, economy });
 const minimap = createMinimap({ smallCanvas: document.getElementById('minimap'), largeCanvas: document.getElementById('large-map'), hero: heroine });
 const interiors = createInteriors(scene);
 const npcs = createNpcSystem(scene, world.surfaceHeight, world.colliders, world.homes);
@@ -65,7 +82,22 @@ function toast(message, icon = null) {
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2400);
 }
 
+function refreshWallet() {
+  document.getElementById('coins').innerHTML = iconMarkup('coin') + ' ' + economy.coins;
+  document.getElementById('pearls').innerHTML = iconMarkup('pearl') + ' ' + economy.pearls;
+}
+
+// Карточка уровня в углу экрана
+function refreshGoals() {
+  document.getElementById('lvl-num').textContent = 'Ур. ' + goals.level;
+  document.getElementById('lvl-rank').textContent = goals.rank;
+  document.getElementById('xp-fill').style.width = Math.round(goals.levelProgress * 100) + '%';
+  const ch = goals.chapter();
+  document.getElementById('goal-line').textContent = ch.finished ? 'Маяк горит!' : 'Цель: ' + ch.title + ' ' + ch.doneCount + '/' + ch.steps.length;
+}
+
 function refreshBag() {
+  goals.sync();
   document.getElementById('coins').innerHTML = iconMarkup('coin') + ' ' + economy.coins;
   document.getElementById('pearls').innerHTML = iconMarkup('pearl') + ' ' + economy.pearls;
   document.getElementById('bag-count').textContent = economy.usedSlots + '/' + economy.bagSize;
@@ -98,6 +130,7 @@ function refreshBag() {
     line.append(label, sell);
     list.append(line);
   }
+  refreshGoals();
 }
 
 document.querySelectorAll('.quick-slot[data-slot]').forEach((slot) => slot.addEventListener('click', () => { const item = economy.summary()[Number(slot.dataset.slot)]; if (item) toast(item.label + ' × ' + item.count); }));
@@ -107,21 +140,94 @@ document.getElementById('dialog-goodbye').addEventListener('click',()=>{document
 document.getElementById('quest-accept').addEventListener('click',()=>{if(!dialogQuestId)return;const result=quests.accept(dialogQuestId);toast(result.message);document.getElementById('npc-dialog').hidden=true;refreshQuestJournal();});
 document.getElementById('quest-open').addEventListener('click',()=>{refreshQuestJournal();document.getElementById('quests-panel').hidden=false;});
 document.getElementById('quest-close').addEventListener('click',()=>{document.getElementById('quests-panel').hidden=true;});
-document.getElementById('quest-content').addEventListener('click',(event)=>{if(event.target.id==='quest-finish'){const result=quests.finish();toast(result.message);refreshBag();refreshQuestJournal();}});
-function openNpcDialog(person){const data=npcs.talk(person.id,world.getDayInfo().dayTime);if(!data)return;dialogQuestId=data.questId;document.getElementById('dialog-name').textContent=data.name;document.getElementById('dialog-text').textContent=data.text;document.getElementById('dialog-affection').textContent='Симпатия: '+data.affection+' из 5';const accept=document.getElementById('quest-accept');const done=data.questId&&quests.isDone(data.questId);accept.disabled=!data.questId||Boolean(quests.active)||done;accept.textContent=!data.questId?'Пока нет задания':done?'Уже выполнено':quests.active?'Сначала закончи текущее':'Взять задание';document.getElementById('npc-dialog').hidden=false;}
-function refreshQuestJournal(){const box=document.getElementById('quest-content');const q=quests.progress();box.replaceChildren();if(!q){const p=document.createElement('p');p.textContent='Активных заданий нет. Поговори с жителями, чтобы узнать, кому нужна помощь.';box.append(p);return;}const title=document.createElement('h3');title.textContent=q.title;const detail=document.createElement('p');detail.textContent='Собери: '+( ({shell:'обычные ракушки',pinkShell:'розовую ракушку',smallFish:'мелкую рыбу',mediumFish:'среднюю рыбу',flower:'цветы'}[q.item]||q.item)+' — '+q.amount+'. Сейчас в сумке: '+Math.min(q.have,q.amount)+'/'+q.amount);const reward=document.createElement('p');reward.textContent='Награда: '+q.reward+' монет';const finish=document.createElement('button');finish.id='quest-finish';finish.type='button';finish.textContent='Передать предметы и получить награду';finish.disabled=q.have<q.amount;box.append(title,detail,reward,finish);}
+document.getElementById('quest-content').addEventListener('click', (event) => {
+  const id = event.target.dataset && event.target.dataset.finish;
+  if (!id) return;
+  const result = quests.finish(id);
+  announce(result.message, result.ok ? 'star' : null, true);
+  refreshBag();
+  refreshQuestJournal();
+});
+function openNpcDialog(person){
+  const data = npcs.talk(person.id, world.getDayInfo().dayTime);
+  if (!data) return;
+  goals.noteTalk(data.id, data.affection, data.gained);
+  const offer = quests.offerFor(data.id, goals.level, data.affection);
+  dialogQuestId = offer.available ? offer.available.id : null;
+  let text = data.text;
+  if (offer.available) {
+    const q = offer.available;
+    text += '\n\n«' + q.text + '»\n' + q.title + ': ' + q.objective + '. Награда: ' + q.reward + ' монет и ' + q.xp + ' опыта.';
+  } else if (offer.locked) {
+    text += '\n\nУ меня будет ещё поручение для тебя (' + offer.lockText + ').';
+  }
+  document.getElementById('dialog-name').textContent = data.name;
+  document.getElementById('dialog-text').textContent = text;
+  document.getElementById('dialog-affection').textContent = 'Симпатия: ' + data.affection + ' из 5' + (data.gained ? ' · разговор принёс опыт' : '');
+  const accept = document.getElementById('quest-accept');
+  accept.disabled = !offer.available || quests.full;
+  accept.textContent = offer.available ? (quests.full ? 'Журнал заполнен' : 'Взять задание') : offer.locked ? 'Пока нет задания' : 'Заданий нет';
+  document.getElementById('npc-dialog').hidden = false;
+}
+function mk(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+function progressBar(have, need) {
+  const bar = mk('div', 'mini-bar');
+  const fill = document.createElement('i');
+  fill.style.width = Math.round(Math.min(1, have / need) * 100) + '%';
+  bar.append(fill);
+  return bar;
+}
+function refreshQuestJournal() {
+  const box = document.getElementById('quest-content');
+  box.replaceChildren();
+  const perk = goals.nextPerk();
+  box.append(mk('p', 'lvl-line', 'Уровень ' + goals.level + ' · ' + goals.rank + (goals.maxed ? '' : ' · опыт ' + goals.xpInLevel + '/' + goals.xpForLevel) + (perk ? '. Дальше — ' + perk : '')));
+  const ch = goals.chapter();
+  const goal = mk('div', 'goal-box');
+  goal.append(mk('h3', '', ch.finished ? 'Главная цель выполнена' : 'Главная цель, глава ' + ch.index + ' из ' + ch.total + ': ' + ch.title), mk('p', '', ch.story));
+  for (const step of ch.steps) {
+    const row = mk('div', 'goal-step' + (step.done ? ' done' : ''));
+    row.append(mk('span', '', step.text + (step.done ? ' — готово' : '')), mk('span', '', step.have + '/' + step.need));
+    goal.append(row, progressBar(step.have, step.need));
+  }
+  if (!ch.finished) goal.append(mk('p', '', 'Награда за главу: ' + ch.reward.coins + ' монет и ' + ch.reward.xp + ' опыта'));
+  box.append(goal);
+  const list = quests.active();
+  box.append(mk('h3', 'q-head', 'Задания (' + list.length + '/' + MAX_ACTIVE + ')'));
+  if (!list.length) box.append(mk('p', '', 'Активных заданий нет. Поговори с жителями, чтобы узнать, кому нужна помощь.'));
+  for (const q of list) {
+    const card = mk('div', 'q-card');
+    card.append(mk('h3', '', q.title), mk('p', '', q.objective), mk('p', '', 'Выполнено: ' + q.have + '/' + q.need + ' · награда ' + q.reward + ' монет, ' + q.xp + ' опыта'), progressBar(q.have, q.need));
+    const button = mk('button', '', q.ready ? 'Сдать и получить награду' : 'Ещё не всё готово');
+    button.type = 'button';
+    button.dataset.finish = q.id;
+    button.disabled = !q.ready;
+    card.append(button);
+    box.append(card);
+  }
+}
+document.getElementById('level-card').addEventListener('click', () => { refreshQuestJournal(); document.getElementById('quests-panel').hidden = false; });
 document.getElementById('bag-close').addEventListener('click', () => { bag.hidden = true; });
 document.getElementById('inventory-list').addEventListener('click', (event) => {
   const id = event.target.dataset.sell;
   if (id) { economy.sell(id); refreshBag(); }
 });
 document.getElementById('bag-upgrade').addEventListener('click', () => {
+  const need = bagLevel(economy.bagSize);
+  if (need && goals.level < need) { toast('Чтобы расширить сумку, нужен ' + need + ' уровень.'); return; }
   toast(economy.upgradeBag() ? 'Сумка стала больше!' : 'Для расширения не хватает монет или сумка уже максимальная.');
   refreshBag();
 });
 document.querySelector('.shop').addEventListener('click', (event) => {
   const rod = event.target.dataset.buyRod;
   if (rod) {
+    const need = ROD_LEVEL[rod];
+    if (need && goals.level < need) { toast('Эта удочка откроется на ' + need + ' уровне.'); return; }
     toast(economy.buyRod(rod) ? 'Удочка куплена!' : 'Пока не хватает монет или жемчужин.');
     refreshBag();
   }
@@ -234,7 +340,9 @@ function landFish(item) {
   disposeFishing();
   if (item) {
     caughtFish = makeCaughtFish(start);
-    toast('Поймана рыба: ' + label + '!', 'fish');
+    goals.count('fish');
+    goals.addXp(XP[item] || 3);
+    announce('Поймана рыба: ' + label + '!', 'fish', true);
   } else {
     toast('Сумка полна — рыба уплыла.');
   }
@@ -290,7 +398,22 @@ async function performAction() {
   if (nearShell) {
     const result = shells.collect();
     if (result?.error) toast(result.error);
-    else if (result?.item) toast('Найдена: ' + ITEMS[result.item].label, result.item === 'starShell' ? 'star' : 'shell');
+    else if (result?.item) {
+      goals.count('shells');
+      goals.addXp(XP[result.item] || 2);
+      announce('Найдена: ' + ITEMS[result.item].label, result.item === 'starShell' ? 'star' : 'shell', true);
+    }
+    refreshBag();
+    return;
+  }
+  if (flowers.update(0, performance.now() / 1000, heroine.position)) {
+    const result = flowers.collect();
+    if (result?.error) toast(result.error);
+    else if (result?.item) {
+      goals.count('flowers');
+      goals.addXp(XP.flower);
+      announce('Сорван цветок', 'star', true);
+    }
     refreshBag();
     return;
   }
@@ -408,6 +531,8 @@ function loop(now) {
   player.update(dt);
   const position = heroine.position;
   const nearbyShell = shells.update(dt, position);
+  const nearbyFlower = flowers.update(dt, now / 1000, position);
+  if (!activeInterior) quests.notePosition(position.x, position.z);
   world.update(now / 1000, position);
   npcs.update(dt, position, world.getDayInfo().dayTime);
   islandLife.update(dt, now / 1000);
@@ -423,6 +548,9 @@ function loop(now) {
     else if (nearbyShell) {
       actionButton.hidden = false;
       actionButton.textContent = 'Взять ракушку';
+    } else if (nearbyFlower) {
+      actionButton.hidden = false;
+      actionButton.textContent = 'Сорвать цветок';
     } else if (world.doors.some((door) => Math.hypot(position.x-door.x, position.z-door.z) < 2.1)) {
       actionButton.hidden=false; actionButton.textContent='Войти в дом';
     } else if (fishingNearby()) {

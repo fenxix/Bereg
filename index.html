@@ -34,11 +34,12 @@
     <span id="fps">FPS: --</span>
   </header>
   <button id="quest-open" type="button">Задания</button>
-  <section id="quests-panel" hidden><div class="panel-head"><h2>Журнал заданий</h2><button id="quest-close" type="button" aria-label="Закрыть">×</button></div><div id="quest-content"></div></section>
+  <div id="level-card" role="button" tabindex="0" aria-label="Уровень и главная цель"><div class="lvl-row"><strong id="lvl-num">Ур. 1</strong><span id="lvl-rank">Новенькая</span></div><div class="xp-bar"><i id="xp-fill"></i></div><small id="goal-line">Цель: …</small></div>
+  <section id="quests-panel" hidden><div class="panel-head"><h2>Журнал и цели</h2><button id="quest-close" type="button" aria-label="Закрыть">×</button></div><div id="quest-content"></div></section>
   <section id="bag" aria-label="Сумка" hidden>
     <div class="panel-head"><h2>Сумка</h2><button id="bag-close" type="button" aria-label="Закрыть">×</button></div>
     <p id="rod-label"></p><div id="inventory-list"></div>
-    <div class="shop"><h3>Сумка и удочки</h3><button id="bag-upgrade" type="button">Расширить сумку (+6)</button><button data-buy-rod="sturdy">Крепкая — 200 <svg class="icon"><use href="#i-coin"></use></svg></button><button data-buy-rod="gilded">Позолоченная — 1000 <svg class="icon"><use href="#i-coin"></use></svg> + 3 <svg class="icon"><use href="#i-pearl"></use></svg></button></div>
+    <div class="shop"><h3>Сумка и удочки</h3><button id="bag-upgrade" type="button">Расширить сумку (+6)</button><button data-buy-rod="sturdy">Крепкая (ур. 3) — 200 <svg class="icon"><use href="#i-coin"></use></svg></button><button data-buy-rod="gilded">Позолоченная (ур. 6) — 1000 <svg class="icon"><use href="#i-coin"></use></svg> + 3 <svg class="icon"><use href="#i-pearl"></use></svg></button></div>
   </section>
   <div id="quickbar"><button class="quick-slot" data-slot="0" aria-label="Быстрый слот 1"><span class="slot-number">1</span></button><button class="quick-slot" data-slot="1" aria-label="Быстрый слот 2"><span class="slot-number">2</span></button><button class="quick-slot" data-slot="2" aria-label="Быстрый слот 3"><span class="slot-number">3</span></button><button id="bag-toggle" class="quick-slot bag-slot" type="button" aria-label="Открыть сумку"><svg class="icon"><use href="#i-bag"></use></svg><span id="bag-count">0/12</span></button></div>
   <div id="fishing-status" aria-live="polite" hidden></div><button id="action" type="button" hidden>Взять</button>
