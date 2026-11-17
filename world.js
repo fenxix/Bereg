@@ -1209,6 +1209,10 @@ function createTown(scene) {
   const homes = [];
   for (const h of HOUSES) { const a=THREE.MathUtils.degToRad(h.angle),x=Math.cos(a)*h.radius,z=Math.sin(a)*h.radius,rot=Math.atan2(-Math.cos(a),-Math.sin(a)),model=houseModel(h.variant),front=model.userData.frontDistance+0.35; doors.push({x:x+Math.sin(rot)*front,z:z+Math.cos(rot)*front}); homes.push({x:x+Math.sin(rot)*(front+1.1),z:z+Math.cos(rot)*(front+1.1)}); }
   for (const h of layout.houses) { doors.push({x:h.doorX,z:h.doorZ}); homes.push({x:h.doorX+Math.sin(h.rotY)*1.1,z:h.doorZ+Math.cos(h.rotY)*1.1}); }
+  // Номера комнат: пять общих интерьеров идут по кругу, а ближайший к площади дом квартала — «Твой домик» (комната 5)
+  doors.forEach((d, i) => { d.interior = i % 5; });
+  const ownDoor = doors.slice(HOUSES.length).reduce((best, d) => (!best || Math.hypot(d.x, d.z) < Math.hypot(best.x, best.z) ? d : best), null);
+  if (ownDoor) { ownDoor.interior = 5; ownDoor.home = true; }
   for (const list of colliders) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; if(list.r!==undefined)list.r*=WORLD_SCALE; if(list.hw!==undefined)list.hw*=WORLD_SCALE; if(list.hd!==undefined)list.hd*=WORLD_SCALE; }
   for (const list of [...doors,...homes]) { list.x*=WORLD_SCALE; list.z*=WORLD_SCALE; }
   console.log(`[Тихий Берег] остров: зон ${ZONES.length}, домов ${HOUSES.length + layout.houses.length}, лавок ${layout.stalls.length}, деревьев ${layout.trees.length}, кустов ${layout.bushes.length}, травы ${layout.tufts.length}, плиток ${validTiles.length}, препятствий ${colliders.length} (из них границы ${wallCount})`);

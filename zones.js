@@ -134,9 +134,10 @@ export function layoutZones({groundHeight,rand,pier,blocked=()=>false,reserved=[
   const addMany=(zoneId,count,separation,dest,make,options={})=>{let placed=0;for(let i=0;i<count*100&&placed<count;i++){const p=pointInZone(zoneId,{...options,separation});if(!p)break;const item=make(p,placed);dest.push(item);if(options.collider)layout.colliders.push(options.collider(p,item));occupy(p,options.occupyRadius??separation*.45);placed++;}return placed;};
   const nearestPath=(x,z)=>{let best={x:0,z:0,distance:Infinity};for(const path of PATHS)for(let i=1;i<path.points.length;i++){const a=path.points[i-1],b=path.points[i],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz||1))),px=a[0]+dx*t,pz=a[1]+dz*t,d=Math.hypot(x-px,z-pz);if(d<best.distance)best={x:px,z:pz,distance:d};}return best;};
 
+  for(const r of reserved)occupy(r,3.2);   // дома кольца у площади тоже занимают место
   // Дома в жилом квартале располагаются рядом с центральной улицей, с палисадом и выходом к дороге.
-  for(let i=0;i<14&&layout.houses.length<11;i++){
-    const p=pointInZone('quarter',{margin:2,minGround:.5,maxGround:5,pathMin:3.2,pathMax:9,separation:5.6,occupyRadius:3.2});if(!p)break;
+  for(let i=0;i<40&&layout.houses.length<11;i++){
+    const p=pointInZone('quarter',{margin:2,minGround:.5,maxGround:5,pathMin:3.2,pathMax:10,separation:3,occupyRadius:3.2});if(!p)break;
     const street=nearestPath(p.x,p.z),rot=Math.atan2(street.x-p.x,street.z-p.z),variant=layout.houses.length%3,front=2.72,doorX=p.x+Math.sin(rot)*front,doorZ=p.z+Math.cos(rot)*front;
     const h={x:p.x,z:p.z,rotY:rot,variant,doorX,doorZ};layout.houses.push(h);layout.colliders.push({kind:'rect',x:p.x,z:p.z,hw:2.3,hd:2.1,rot});
     layout.doorPaths.push({ax:doorX,az:doorZ,bx:street.x,bz:street.z});layout.mailboxes.push({x:doorX+Math.cos(rot)*1.25,z:doorZ-Math.sin(rot)*1.25,rotY:rot});
