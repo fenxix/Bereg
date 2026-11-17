@@ -1,4 +1,4 @@
-const CACHE_NAME = 'quiet-shore-v13';
+const CACHE_NAME = 'quiet-shore-v14';
 const FILES = ['./','./index.html','./style.css','./main.js','./world.js','./zones.js','./scenery.js','./minimap.js','./interiors.js','./npc.js','./quests.js','./life.js','./models.js','./player.js','./economy.js','./ui.js','./shells.js','./goals.js','./flowers.js','./manifest.json'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim())); });
