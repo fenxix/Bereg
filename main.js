@@ -28,7 +28,7 @@ container.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
 const world = createWorld(scene);
-const heroine = createHeroine();
+const heroine = createHeroine({ satchel: true });
 scene.add(heroine);
 const player = createPlayer({
   model: heroine, camera, domElement: renderer.domElement,

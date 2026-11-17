@@ -249,14 +249,46 @@ export function checkModel(group, name = 'модель') {
   return ok;
 }
 
+// ===== Запекание внутри персонажа: детали одного цвета в одной «кости» склеиваются в одну деталь =====
+// Суставы (ноги, руки, голова, косички) остаются на месте и двигаются, а мелкие детали внутри них не плодят лишние вызовы отрисовки.
+function bakeChildren(parent) {
+  const byMaterial = new Map();
+  const meshes = [];
+  for (const child of [...parent.children]) {
+    if (child.isMesh) meshes.push(child);
+    else if (child.children.length) bakeChildren(child);
+  }
+  for (const mesh of meshes) {
+    mesh.updateMatrix();
+    const geo = mesh.geometry.clone();
+    geo.applyMatrix4(mesh.matrix);
+    if (!byMaterial.has(mesh.material)) byMaterial.set(mesh.material, []);
+    byMaterial.get(mesh.material).push(geo);
+    parent.remove(mesh);
+  }
+  let i = 0;
+  for (const [material, geos] of byMaterial) {
+    const merged = new THREE.Mesh(mergeGeos(geos), material);
+    merged.name = 'часть-' + i++;
+    merged.castShadow = true;
+    parent.add(merged);
+  }
+}
+
 // ===== Героиня (пропорции чиби: голова = треть роста) =====
+// Все жители острова тоже собираются здесь, поэтому новые детали видны у всех.
+// options: height, dressColor, hairColor, skinColor, eyeColor, hairStyle ('braids' | 'ponytail' | 'short' | 'bob' | 'bun' | 'curly'),
+//          satchel (рюкзачок за спиной), trimColor (цвет воротничка, подола и носочков)
 export function createHeroine(options = {}) {
   const {
     height = 1.6,
     dressColor = 0xE8836B,
     hairColor = 0x8A6240,
     skinColor = 0xF7D9BF,
-    hairStyle = 'braids', // 'braids' (косички) или 'ponytail' (хвост)
+    eyeColor = 0x3A2A2A,
+    trimColor = 0xFFF4E3,
+    hairStyle = 'braids',
+    satchel = false,
   } = options;
 
   // --- Размеры (всё остальное считается от них) ---
@@ -278,105 +310,178 @@ export function createHeroine(options = {}) {
   const dressH = dressTop - dressBottom;
   const shoulderY = dressTop - 0.1;
   const shoulderX = DRESS_R_TOP + 0.01;
+  const dressRadiusAt = (y) => DRESS_R_BOTTOM + (DRESS_R_TOP - DRESS_R_BOTTOM) * (y - dressBottom) / dressH;
+  const beltColor = new THREE.Color(dressColor).multiplyScalar(0.78).getHex();
 
   const group = new THREE.Group();
   group.name = 'heroine';
   const rig = new THREE.Group(); // внутри неё всё, что можно слегка подпрыгивать при ходьбе
   group.add(rig);
 
-  // Платье и голова
+  // --- Платье: основа, воротничок, подол, пояс с бантом на спине, пуговицы ---
   addPart(rig, new THREE.CylinderGeometry(DRESS_R_TOP, DRESS_R_BOTTOM, dressH, 10), dressColor,
     'платье', 0, dressBottom + dressH / 2, 0);
-  addPart(rig, new THREE.SphereGeometry(HEAD_R, 12, 10), skinColor, 'голова', 0, headY, 0);
+  const collar = addPart(rig, new THREE.TorusGeometry(DRESS_R_TOP * 0.92, 0.032, 6, 14), trimColor,
+    'воротничок', 0, dressTop - 0.01, 0);
+  collar.rotation.x = Math.PI / 2;
+  const hem = addPart(rig, new THREE.TorusGeometry(DRESS_R_BOTTOM, 0.02, 6, 14), trimColor,
+    'кайма подола', 0, dressBottom + 0.02, 0);
+  hem.rotation.x = Math.PI / 2;
+  const waistY = dressBottom + dressH * 0.6;
+  const waistR = dressRadiusAt(waistY);
+  addPart(rig, new THREE.CylinderGeometry(waistR + 0.014, waistR + 0.023, 0.05, 10), beltColor, 'пояс', 0, waistY, 0);
+  addPart(rig, new THREE.SphereGeometry(0.035, 7, 5), beltColor, 'узел банта', 0, waistY, -(waistR + 0.03));
+  for (const side of [-1, 1]) {
+    const loop = addPart(rig, new THREE.SphereGeometry(0.05, 7, 5), beltColor, 'петля банта',
+      side * 0.065, waistY, -(waistR + 0.035));
+    loop.scale.set(1.3, 0.85, 0.6);
+  }
+  for (const y of [waistY + 0.1, waistY + 0.19]) {
+    addPart(rig, new THREE.SphereGeometry(0.018, 6, 5), trimColor, 'пуговица', 0, y, dressRadiusAt(y) * 0.98);
+  }
 
-  // Ноги на суставах-бёдрах, на ногах туфельки
+  // --- Рюкзачок (по желанию): коробка, клапан и лямки на груди ---
+  if (satchel) {
+    const bagZ = -(dressRadiusAt(0.86) + 0.04);
+    addBox(rig, 0.26, 0.3, 0.1, P.woodLight, 'рюкзак', 0, 0.86, bagZ);
+    addBox(rig, 0.27, 0.09, 0.115, P.darkWood, 'клапан рюкзака', 0, 0.97, bagZ);
+    addPart(rig, new THREE.SphereGeometry(0.02, 6, 5), P.gold, 'пряжка', 0, 0.93, bagZ - 0.06);
+    for (const side of [-1, 1]) {
+      addBox(rig, 0.035, 0.2, 0.02, P.darkWood, 'лямка', side * 0.085, 0.94, dressRadiusAt(0.94) * 0.99);
+    }
+  }
+
+  // --- Голова на «шее»: можно слегка кивать. Всё, что на голове, лежит внутри этого сустава ---
+  const neck = addJoint(rig, 'шея', 0, dressTop, 0);
+  const hy = headY - dressTop;                       // высота центра головы внутри шеи
+  addPart(neck, new THREE.SphereGeometry(HEAD_R, 12, 10), skinColor, 'голова', 0, hy, 0);
+
+  // Ноги на суставах-бёдрах: нога, носочек и туфелька
   const legs = {};
   for (const side of [-1, 1]) {
     const hip = addJoint(rig, side > 0 ? 'бедро-правое' : 'бедро-левое', side * HIP_X, LEG_LEN, 0);
     addPart(hip, new THREE.CylinderGeometry(LEG_R, LEG_R, LEG_LEN, 8), skinColor, 'нога', 0, -LEG_LEN / 2, 0);
+    addPart(hip, new THREE.CylinderGeometry(LEG_R + 0.01, LEG_R + 0.01, 0.14, 8), trimColor, 'носочек', 0, -LEG_LEN + 0.09, 0);
     const shoe = addPart(hip, new THREE.SphereGeometry(SHOE_R, 8, 6), 0x8A6240, 'туфелька',
       0, -LEG_LEN + SHOE_R * SHOE_SQUASH, 0.03);
     shoe.scale.set(1, SHOE_SQUASH, 1.5);
     legs[side > 0 ? 'right' : 'left'] = hip;
   }
 
-  // Руки на суставах-плечах, слегка отведены в стороны
+  // Руки на суставах-плечах: пышный рукавчик, рука, ладонь
   const arms = {};
   for (const side of [-1, 1]) {
     const shoulder = addJoint(rig, side > 0 ? 'плечо-правое' : 'плечо-левое', side * shoulderX, shoulderY, 0);
     shoulder.rotation.z = side * ARM_TILT;
     addPart(shoulder, new THREE.CylinderGeometry(ARM_R, ARM_R, ARM_LEN, 8), skinColor, 'рука', 0, -ARM_LEN / 2, 0);
+    addPart(shoulder, new THREE.SphereGeometry(0.075, 8, 6), dressColor, 'рукавчик', 0, -0.03, 0);
     addPart(shoulder, new THREE.SphereGeometry(HAND_R, 8, 6), skinColor, 'ладонь', 0, -ARM_LEN, 0);
     arms[side > 0 ? 'right' : 'left'] = shoulder;
   }
 
-  // Волосы: шапка-сфера со срезом
-  const cap = addPart(rig, new THREE.SphereGeometry(HAIR_R, 12, 10, 0, Math.PI * 2, 0, HAIR_CUT),
-    hairColor, 'волосы', 0, headY, 0, true);
+  // --- Волосы: шапка-сфера со срезом, чёлка, прядки у висков и причёска ---
+  const cap = addPart(neck, new THREE.SphereGeometry(HAIR_R, 12, 10, 0, Math.PI * 2, 0, HAIR_CUT),
+    hairColor, 'волосы', 0, hy, 0, true);
   cap.rotation.x = -HAIR_TILT;
 
+  // Лицо и чёлка: плоские формы, прижатые к голове. sx, sy — растяжение формы.
+  const onHead = (x, dy, geometry, color, name, squashZ, sink, sx = 1, sy = 1) => {
+    const z = Math.sqrt(HEAD_R ** 2 - x ** 2 - dy ** 2) - sink;
+    const mesh = addPart(neck, geometry, color, name, x, hy + dy, z);
+    mesh.scale.set(sx, sy, squashZ);
+    mesh.rotation.y = Math.atan2(x, z); // поворот по поверхности головы
+    return mesh;
+  };
+  for (const x of [-0.1, 0, 0.1]) {
+    onHead(x, 0.14, new THREE.SphereGeometry(0.065, 8, 6), hairColor, 'чёлка', 0.6, -0.012, 1.1, 0.9);
+  }
+  for (const side of [-1, 1]) {
+    onHead(side * 0.2, 0.0, new THREE.SphereGeometry(0.055, 8, 6), hairColor, 'прядка у виска', 0.8, -0.005, 0.8, 1.5);
+  }
+
+  const hairJoints = [];   // качаются при ходьбе
+  const swingJoint = (joint, baseX, offset) => {
+    joint.rotation.x = baseX;
+    joint.userData.baseX = baseX;
+    joint.userData.offset = offset;
+    hairJoints.push(joint);
+  };
   if (hairStyle === 'ponytail') {
-    const tail = addJoint(rig, 'хвост-крепление', 0, headY, -HAIR_R * 0.75);
-    tail.rotation.x = 0.4; // откидываем назад
+    const tail = addJoint(neck, 'хвост-крепление', 0, hy, -HAIR_R * 0.75);
     addPart(tail, new THREE.CylinderGeometry(0.06, 0.02, 0.35, 8), hairColor, 'хвост', 0, -0.17, 0);
+    addPart(tail, new THREE.SphereGeometry(0.045, 8, 6), 0xF4A6B8, 'резинка', 0, -0.02, 0);
+    swingJoint(tail, 0.4, 0);
   } else if (hairStyle === 'short' || hairStyle === 'bob') {
     for (const side of [-1, 1]) {
-      const lock = addPart(rig, new THREE.SphereGeometry(0.105, 8, 6), hairColor, 'короткая-прядь', side * 0.13, headY - 0.09, 0.02);
+      const lock = addPart(neck, new THREE.SphereGeometry(0.105, 8, 6), hairColor, 'короткая-прядь', side * 0.13, hy - 0.09, 0.02);
       lock.scale.set(1, 1.35, 0.9);
       if (hairStyle === 'bob') {
-        const bob = addPart(rig, new THREE.SphereGeometry(0.11, 8, 6), hairColor, 'каре', side * 0.14, headY - 0.2, -0.01);
+        const bob = addPart(neck, new THREE.SphereGeometry(0.11, 8, 6), hairColor, 'каре', side * 0.14, hy - 0.2, -0.01);
         bob.scale.set(1, 1.35, 1);
       }
     }
   } else if (hairStyle === 'bun') {
-    addPart(rig, new THREE.SphereGeometry(0.12, 8, 6), hairColor, 'пучок', 0, headY + 0.08, -0.13);
+    addPart(neck, new THREE.SphereGeometry(0.12, 8, 6), hairColor, 'пучок', 0, hy + 0.08, -0.13);
   } else if (hairStyle === 'curly') {
     for (let i = 0; i < 7; i++) {
       const a = i * Math.PI * 2 / 7;
-      addPart(rig, new THREE.SphereGeometry(0.075, 7, 5), hairColor, 'локон', Math.cos(a) * 0.14, headY + 0.06 + Math.sin(a) * 0.1, -0.045);
+      addPart(neck, new THREE.SphereGeometry(0.075, 7, 5), hairColor, 'локон', Math.cos(a) * 0.14, hy + 0.06 + Math.sin(a) * 0.1, -0.045);
     }
   } else {
     const BRAID_LEN = 0.3, BRAID_R = 0.035;
-    const braidTop = headY - 0.02;
+    const braidTop = hy - 0.02;
     for (const side of [-1, 1]) {
-      addPart(rig, new THREE.CylinderGeometry(BRAID_R, BRAID_R, BRAID_LEN, 8), hairColor, 'косичка',
-        side * 0.2, braidTop - BRAID_LEN / 2, -0.12);
-      addPart(rig, new THREE.SphereGeometry(0.045, 8, 6), 0xF4A6B8, 'бантик',
-        side * 0.2, braidTop - BRAID_LEN, -0.12);
+      const braid = addJoint(neck, 'косичка-крепление', side * 0.2, braidTop, -0.12);
+      addPart(braid, new THREE.CylinderGeometry(BRAID_R, BRAID_R, BRAID_LEN, 8), hairColor, 'косичка', 0, -BRAID_LEN / 2, 0);
+      addPart(braid, new THREE.SphereGeometry(0.045, 8, 6), 0xF4A6B8, 'бантик', 0, -BRAID_LEN, 0);
+      swingJoint(braid, 0, side > 0 ? 0 : 1.7);
     }
   }
 
-  // Лицо: глаза и румянец — маленькие плоские формы, прижатые к голове
-  const onHead = (x, dy, geometry, color, name, squashZ, sink) => {
-    const y = headY + dy;
-    const z = Math.sqrt(HEAD_R ** 2 - x ** 2 - dy ** 2) - sink;
-    const mesh = addPart(rig, geometry, color, name, x, y, z);
-    mesh.scale.z = squashZ;
-    mesh.rotation.y = Math.atan2(x, z); // поворот по поверхности головы
-  };
+  // --- Лицо: глаза с бликами, брови, румянец, ротик ---
   for (const side of [-1, 1]) {
-    onHead(side * 0.09, -0.02, new THREE.SphereGeometry(0.03, 8, 6), 0x3A2A2A, 'глаз', 0.4, 0.005);
+    onHead(side * 0.09, -0.02, new THREE.SphereGeometry(0.034, 8, 6), eyeColor, 'глаз', 0.4, 0.005);
+    onHead(side * 0.09 - side * 0.008, -0.008, new THREE.SphereGeometry(0.011, 6, 5), 0xFFFFFF, 'блик глаза', 0.6, -0.01);
+    onHead(side * 0.09, 0.04, new THREE.SphereGeometry(0.026, 6, 5), hairColor, 'бровь', 0.3, -0.002, 1.5, 0.38);
     onHead(side * 0.15, -0.075, new THREE.SphereGeometry(0.035, 8, 6), 0xF4A6B8, 'румянец', 0.25, 0.003);
   }
+  onHead(0, -0.085, new THREE.SphereGeometry(0.02, 6, 5), 0xC46A6A, 'ротик', 0.3, 0.002, 1.5, 0.5);
 
   group.userData.rig = rig;
   group.userData.legs = legs;
   group.userData.arms = arms;
+  group.userData.head = neck;
+  group.userData.hair = hairJoints;
 
   group.scale.setScalar(height / H);
   checkModel(group, 'Героиня');
+  // Склеиваем мелкие детали по цветам (внутри каждого сустава отдельно): персонаж выглядит так же, но рисуется в несколько раз быстрее
+  bakeChildren(rig);
   return group;
 }
 
-// ===== Анимация ходьбы: phase — «шаг», amount от 0 (стоит) до 1 (идёт) =====
+// ===== Анимация: phase — «шаг», amount от 0 (стоит) до 1 (идёт) =====
+// Ходьба: ноги и руки, покачивание корпуса, кивок головой, косички и хвост. Стоя: лёгкое дыхание и покачивание волос.
 export function animateCharacter(group, phase, amount) {
-  const { rig, legs, arms } = group.userData;
+  const { rig, legs, arms, head, hair } = group.userData;
   const swing = Math.sin(phase) * 0.7 * amount;
   legs.left.rotation.x = swing;
   legs.right.rotation.x = -swing;
   arms.left.rotation.x = -swing * 0.8;
   arms.right.rotation.x = swing * 0.8;
   rig.position.y = Math.abs(Math.sin(phase)) * 0.04 * amount;
+  rig.rotation.z = Math.sin(phase) * 0.025 * amount;
+  rig.scale.y = 1 + Math.sin(phase * 0.5) * 0.008 * (1 - amount);
+  if (head) {
+    head.rotation.x = Math.sin(phase * 2) * 0.035 * amount + Math.sin(phase * 0.5) * 0.02 * (1 - amount);
+    head.rotation.z = Math.sin(phase) * 0.03 * amount;
+  }
+  if (hair) {
+    for (const joint of hair) {
+      const off = joint.userData.offset || 0;
+      joint.rotation.x = (joint.userData.baseX || 0) + Math.sin(phase * 2 + off) * 0.18 * amount + Math.sin(phase * 0.5 + off) * 0.03 * (1 - amount);
+    }
+  }
 }
 
 // =====================================================================
